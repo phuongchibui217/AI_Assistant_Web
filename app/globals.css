@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* iOS Safari auto-zooms the page when a focused input/textarea/select has a
+   font-size below 16px. Force 16px on phone-sized viewports so tapping any
+   field (the chat composer especially) never triggers the zoom-on-focus the
+   BA reported. !important to win over Tailwind utility font-size classes. */
+@media (max-width: 767px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+.chat-history-table-frame {
+  container-type: inline-size;
+}
+
+@container (max-width: 40rem) {
+  .chat-history-table,
+  .chat-history-table tbody {
+    display: block;
+  }
+
+  .chat-history-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .chat-history-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    padding: 0.75rem;
+  }
+
+  .chat-history-table tbody td {
+    min-width: 0;
+    padding: 0;
+  }
+
+  .chat-history-table tbody td:nth-child(2) {
+    text-align: right;
+  }
+
+  .chat-history-table tbody td:nth-child(n + 3) {
+    grid-column: 1 / -1;
+  }
+
+  .chat-history-table tbody td:last-child:empty {
+    display: none;
+  }
+}

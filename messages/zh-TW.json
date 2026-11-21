@@ -1,0 +1,86 @@
+{
+  "greeting": "您好！我是{name}。请问今天有什么可以为您服务的吗？可以使用下方的麦克风或输入框。",
+  "avatarNameMale": "一之濑",
+  "bottomBar": {
+    "placeholder": "请输入问题，或按住麦克风说话",
+    "recognizing": "识别中…",
+    "micStart": "按住说话",
+    "micStop": "停止",
+    "skip": "跳过",
+    "send": "发送",
+    "audioOn": "取消静音",
+    "audioOff": "静音",
+    "settings": "设置",
+    "help": "说明",
+    "listening": "聆听中…松开结束",
+    "micLangTitle": "麦克风输入语言",
+    "micLangLive": "说话时实时显示文字",
+    "micLangNoLive": "说完话后才显示文字"
+  },
+  "topBar": {
+    "hideAvatar": "纯文字模式（隐藏虚拟人像）",
+    "showAvatar": "显示虚拟人像",
+    "translateMode": "翻译模式（选择两种语言）",
+    "translateLangA": "翻译语言 A",
+    "translateLangB": "翻译语言 B",
+    "translateSwap": "交换语言"
+  },
+  "chat": {
+    "reference": "参考资料",
+    "copy": "复制",
+    "copied": "已复制",
+    "openReference": "打开参考资料",
+    "edit": "编辑"
+  },
+  "infoPanel": {
+    "close": "关闭"
+  },
+  "login": {
+    "title": "AI 虚拟助手",
+    "username": "账号",
+    "password": "密码",
+    "signIn": "登录",
+    "signingIn": "登录中…",
+    "checking": "确认中…",
+    "invalidCredentials": "账号或密码错误。",
+    "loginFailed": "登录失败，请稍后再试。"
+  },
+  "settings": {
+    "title": "设置",
+    "noOptions": "目前没有可用的选项。",
+    "futureNote": "语言、语音与模型设置将于未来版本推出。",
+    "genderLabel": "虚拟人像",
+    "genderFemale": "女性（Chi）",
+    "genderMale": "男性（瑛太）",
+    "logout": "退出登录",
+    "logoutFailed": "退出登录失败。请重试。"
+  },
+  "help": {
+    "title": "使用方式",
+    "intro": "您好，我是{name}。您可以通过以下方式与我互动。",
+    "li1": "输入问题后按 Enter 发送",
+    "li2": "按住麦克风按钮进行语音输入，或按住 M 键直接说话并实时发送",
+    "li3": "使用喇叭按钮开启或关闭语音",
+    "outro": "我可以回答有关公司规定、费用申请、考勤管理等内部相关知识的问题。"
+  },
+  "status": {
+    "idle": "待机中",
+    "connecting": "连接中…",
+    "ready": "准备完成",
+    "listening": "聆听中…",
+    "disconnected": "已断开连接",
+    "error": "发生错误"
+  },
+  "lang": {
+    "switchTo": "切换语言",
+    "vi": "Tiếng Việt",
+    "ja": "日本語",
+    "en": "English",
+    "zh-TW": "中文"
+  },
+  "errors": {
+    "speechUnsupported": "此浏览器不支持语音输入功能，请使用 Chrome 或 Edge。",
+    "micPermissionDenied": "麦克风访问权限被拒绝，请检查浏览器设置。",
+    "speechUnavailable": "無法以回答的語言播放語音。"
+  }
+}

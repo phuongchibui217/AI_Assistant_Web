@@ -1,0 +1,86 @@
+{
+  "greeting": "Hello! I'm {name}. How may I help you today? Use the mic or text input below.",
+  "avatarNameMale": "Ichinose",
+  "bottomBar": {
+    "placeholder": "Type a question or press and hold the mic to speak",
+    "recognizing": "Recognizing…",
+    "micStart": "Hold to speak",
+    "micStop": "Stop",
+    "skip": "Skip",
+    "send": "Send",
+    "audioOn": "Unmute",
+    "audioOff": "Mute",
+    "settings": "Settings",
+    "help": "Help",
+    "listening": "Listening… release to finish",
+    "micLangTitle": "Mic input language",
+    "micLangLive": "Live text while speaking",
+    "micLangNoLive": "Text appears after speaking"
+  },
+  "topBar": {
+    "hideAvatar": "Text only (hide avatar)",
+    "showAvatar": "Show avatar",
+    "translateMode": "Translate mode (choose both languages)",
+    "translateLangA": "Translate language A",
+    "translateLangB": "Translate language B",
+    "translateSwap": "Swap languages"
+  },
+  "chat": {
+    "reference": "Ref",
+    "copy": "Copy",
+    "copied": "Copied",
+    "openReference": "Open reference",
+    "edit": "Edit"
+  },
+  "infoPanel": {
+    "close": "Close"
+  },
+  "login": {
+    "title": "AI Virtual Assistant",
+    "username": "Username",
+    "password": "Password",
+    "signIn": "Sign in",
+    "signingIn": "Signing in…",
+    "checking": "Checking…",
+    "invalidCredentials": "Incorrect username or password.",
+    "loginFailed": "Sign-in failed. Please try again in a moment."
+  },
+  "settings": {
+    "title": "Settings",
+    "noOptions": "No options available right now.",
+    "futureNote": "Language, voice and model controls will arrive in a future release.",
+    "genderLabel": "Avatar",
+    "genderFemale": "Female (Chi)",
+    "genderMale": "Male (Eita)",
+    "logout": "Sign out",
+    "logoutFailed": "Logout failed. Please try again."
+  },
+  "help": {
+    "title": "How to use",
+    "intro": "Hi, I'm {name}. You can interact with me as follows.",
+    "li1": "Type a question and press Enter to send",
+    "li2": "Press and hold the mic button for voice input, or hold M to speak and send instantly",
+    "li3": "Use the speaker button to mute or unmute audio",
+    "outro": "I can answer questions about company rules, expenses, attendance, and other internal knowledge."
+  },
+  "status": {
+    "idle": "Idle",
+    "connecting": "Connecting…",
+    "ready": "Ready",
+    "listening": "Listening…",
+    "disconnected": "Disconnected",
+    "error": "Error"
+  },
+  "lang": {
+    "switchTo": "Switch language",
+    "vi": "Tiếng Việt",
+    "ja": "日本語",
+    "en": "English",
+    "zh-TW": "中文"
+  },
+  "errors": {
+    "speechUnsupported": "Voice input is not supported in this browser. Please use Chrome or Edge.",
+    "micPermissionDenied": "Microphone access was denied. Please check your browser settings.",
+    "speechUnavailable": "Could not play the reply in its language."
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "greeting": "こんにちは！{name}です。本日は私にご質問ですね？画面下のマイクか入力欄からどうぞ。",
+  "avatarNameMale": "一ノ瀬",
+  "bottomBar": {
+    "placeholder": "質問を入力またはマイクボタン長押しで話してください",
+    "recognizing": "認識中…",
+    "micStart": "マイクで話す",
+    "micStop": "停止",
+    "skip": "スキップ",
+    "send": "送信",
+    "audioOn": "音声をオン",
+    "audioOff": "音声をオフ",
+    "settings": "設定",
+    "help": "ヘルプ",
+    "listening": "聞いています…　指を離すと確定します",
+    "micLangTitle": "マイク入力言語",
+    "micLangLive": "話しながら文字表示",
+    "micLangNoLive": "話し終えてから表示"
+  },
+  "topBar": {
+    "hideAvatar": "テキストのみ（アバター非表示）",
+    "showAvatar": "アバターを表示",
+    "translateMode": "翻訳モード（言語ペアを選択）",
+    "translateLangA": "翻訳言語A",
+    "translateLangB": "翻訳言語B",
+    "translateSwap": "言語を入れ替え"
+  },
+  "chat": {
+    "reference": "参考",
+    "copy": "コピー",
+    "copied": "コピーしました",
+    "openReference": "参考資料を開く",
+    "edit": "編集"
+  },
+  "infoPanel": {
+    "close": "閉じる"
+  },
+  "login": {
+    "title": "AIバーチャルアシスタント",
+    "username": "ユーザー名",
+    "password": "パスワード",
+    "signIn": "ログイン",
+    "signingIn": "ログイン中…",
+    "checking": "確認中…",
+    "invalidCredentials": "ユーザー名またはパスワードが正しくありません。",
+    "loginFailed": "ログインに失敗しました。しばらくしてからもう一度お試しください。"
+  },
+  "settings": {
+    "title": "設定",
+    "noOptions": "現在、設定可能な項目はありません。",
+    "futureNote": "言語・音声・モデル切替は次のリリースで追加予定です。",
+    "genderLabel": "アバター",
+    "genderFemale": "女性（Chi）",
+    "genderMale": "男性（瑛太）",
+    "logout": "ログアウト",
+    "logoutFailed": "ログアウトできませんでした。もう一度お試しください。"
+  },
+  "help": {
+    "title": "使い方",
+    "intro": "こんにちは、{name}です。下記の操作で会話できます。",
+    "li1": "入力欄に質問を入力して Enter キーで送信",
+    "li2": "マイクボタンを押している間で音声入力、または M キー長押しで話してすぐ送信",
+    "li3": "スピーカーボタンで音声出力をオン / オフ",
+    "outro": "社内規定・経費精算・勤怠など、社内ナレッジに関する質問にも対応します。"
+  },
+  "status": {
+    "idle": "待機中",
+    "connecting": "接続中…",
+    "ready": "準備完了",
+    "listening": "聞いています…",
+    "disconnected": "切断",
+    "error": "エラー"
+  },
+  "lang": {
+    "switchTo": "言語切替",
+    "vi": "Tiếng Việt",
+    "ja": "日本語",
+    "en": "English",
+    "zh-TW": "中文"
+  },
+  "errors": {
+    "speechUnsupported": "音声入力に対応していないブラウザです。Chrome または Edge をご利用ください。",
+    "micPermissionDenied": "マイクへのアクセスが拒否されました。ブラウザの設定をご確認ください。",
+    "speechUnavailable": "回答の言語で音声を再生できませんでした。"
+  }
+}

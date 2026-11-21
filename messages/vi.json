@@ -1,0 +1,86 @@
+{
+  "greeting": "Xin chào! Tôi là {name}. Hôm nay tôi có thể hỗ trợ gì cho bạn? Hãy sử dụng micrô hoặc nhập câu hỏi vào ô bên dưới nhé.",
+  "avatarNameMale": "Trợ lý AI",
+  "bottomBar": {
+    "placeholder": "Nhập câu hỏi hoặc nhấn giữ micrô để nói chuyện...",
+    "recognizing": "Đang nhận diện giọng nói…",
+    "micStart": "Nhấn giữ để nói",
+    "micStop": "Dừng",
+    "skip": "Bỏ qua",
+    "send": "Gửi",
+    "audioOn": "Bật âm thanh",
+    "audioOff": "Tắt tiếng",
+    "settings": "Cài đặt",
+    "help": "Trợ giúp",
+    "listening": "Đang lắng nghe… thả tay để hoàn thành",
+    "micLangTitle": "Ngôn ngữ thu âm giọng nói",
+    "micLangLive": "Hiển thị văn bản trực tiếp khi nói",
+    "micLangNoLive": "Hiển thị văn bản sau khi nói xong"
+  },
+  "topBar": {
+    "hideAvatar": "Chỉ văn bản (ẩn nhân vật ảo)",
+    "showAvatar": "Hiển thị nhân vật ảo",
+    "translateMode": "Chế độ phiên dịch (chọn cả hai ngôn ngữ)",
+    "translateLangA": "Ngôn ngữ dịch A",
+    "translateLangB": "Ngôn ngữ dịch B",
+    "translateSwap": "Đổi chiều ngôn ngữ"
+  },
+  "chat": {
+    "reference": "Tài liệu trích dẫn",
+    "copy": "Sao chép",
+    "copied": "Đã sao chép",
+    "openReference": "Mở tài liệu tham khảo",
+    "edit": "Chỉnh sửa"
+  },
+  "infoPanel": {
+    "close": "Đóng"
+  },
+  "login": {
+    "title": "Hệ thống Trợ lý ảo AI",
+    "username": "Tên đăng nhập",
+    "password": "Mật khẩu",
+    "signIn": "Đăng nhập",
+    "signingIn": "Đang đăng nhập…",
+    "checking": "Đang kiểm tra…",
+    "invalidCredentials": "Tên đăng nhập hoặc mật khẩu không chính xác.",
+    "loginFailed": "Đăng nhập thất bại. Vui lòng thử lại sau giây lát."
+  },
+  "settings": {
+    "title": "Cài đặt hệ thống",
+    "noOptions": "Hiện không có tùy chọn khả dụng.",
+    "futureNote": "Tùy chỉnh ngôn ngữ, giọng đọc và mô hình AI sẽ được cập nhật trong phiên bản tiếp theo.",
+    "genderLabel": "Nhân vật đại diện",
+    "genderFemale": "Nữ (Chi)",
+    "genderMale": "Nam (Eita)",
+    "logout": "Đăng xuất",
+    "logoutFailed": "Đăng xuất thất bại. Vui lòng thử lại."
+  },
+  "help": {
+    "title": "Hướng dẫn sử dụng",
+    "intro": "Xin chào, tôi là {name}. Bạn có thể tương tác với tôi như sau:",
+    "li1": "Nhập câu hỏi và nhấn phím Enter để gửi",
+    "li2": "Nhấn và giữ nút micrô để nói, hoặc giữ phím M để nói và gửi ngay lập tức",
+    "li3": "Sử dụng nút loa để bật hoặc tắt âm thanh giọng nói",
+    "outro": "Tôi có thể giải đáp các thắc mắc về quy định, tài liệu nội bộ, chính sách và cơ sở tri thức doanh nghiệp."
+  },
+  "status": {
+    "idle": "Chờ lệnh",
+    "connecting": "Đang kết nối…",
+    "ready": "Sẵn sàng",
+    "listening": "Đang lắng nghe…",
+    "disconnected": "Đã ngắt kết nối",
+    "error": "Lỗi kết nối"
+  },
+  "lang": {
+    "switchTo": "Chuyển đổi ngôn ngữ",
+    "vi": "Tiếng Việt",
+    "ja": "日本語",
+    "en": "English",
+    "zh-TW": "中文"
+  },
+  "errors": {
+    "speechUnsupported": "Trình duyệt này chưa hỗ trợ thu âm giọng nói. Vui lòng sử dụng Google Chrome hoặc Microsoft Edge.",
+    "micPermissionDenied": "Quyền truy cập micrô bị từ chối. Vui lòng kiểm tra lại cài đặt trình duyệt.",
+    "speechUnavailable": "Không phát được giọng đọc cho ngôn ngữ của câu trả lời."
+  }
+}

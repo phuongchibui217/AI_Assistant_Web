@@ -1,0 +1,40 @@
+# dependencies
+node_modules
+/.pnp
+.pnp.js
+
+# next.js
+.next/
+out/
+build/
+dist/
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# env - catch every variant; only the documented example is committed
+.env
+.env.*
+!.env.local.example
+
+# local demo state
+/demo-data.json
+/demo-data.json.*.tmp
+/local-settings.json
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# misc
+*.pem
+.cache/
+.credentials/
