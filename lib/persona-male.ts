@@ -1,21 +1,19 @@
 /**
  * Male avatar persona (issue 5), mirroring the female `persona.ts` shape so a
- * gender selector can swap between them. Name confirmed by the client as
- * 一ノ瀬 瑛太 (Ichinose Eita), matching the face-icon source. Color and the
- * persona instruction stay parallel to the female persona.
+ * gender selector can swap between them. Color and the persona instruction
+ * stay parallel to the female persona.
  *
  * The icon and sprite assets live under /avatar-male/ (parallel to /avatar/).
  */
 
-export const AVATAR_NAME_MALE = "一ノ瀬";
-// Romanised display name for the English UI (parallel to the female persona).
-export const AVATAR_NAME_MALE_ROMAJI = "ICHINOSE";
-export const AVATAR_NAME_FULL_MALE = "一ノ瀬 瑛太";
+export const AVATAR_NAME_MALE = "Lee";
+export const AVATAR_NAME_MALE_ROMAJI = AVATAR_NAME_MALE;
+export const AVATAR_NAME_FULL_MALE = AVATAR_NAME_MALE;
 export const AVATAR_NAME_COLOR_MALE = "#1e90ff"; // blue, to read distinct from the female magenta
-export const AVATAR_ICON_URL_MALE = "/avatar-male/face_icon.png";
+export const AVATAR_ICON_URL_MALE = "/avatar-male/lee/face-icon.png";
 
 export const INITIAL_GREETING_MALE =
-  "こんにちは！一ノ瀬です。本日は私にご質問ですね？画面下のマイクか入力欄からどうぞ。";
+  `こんにちは！${AVATAR_NAME_MALE}です。本日は私にご質問ですね？画面下のマイクか入力欄からどうぞ。`;
 
 /**
  * System instruction for the male persona. Same advisor behaviour, language
@@ -23,11 +21,11 @@ export const INITIAL_GREETING_MALE =
  * Kept in sync with `persona.ts`; if the female rules change, update both.
  */
 export const LIVE_SYSTEM_INSTRUCTION_MALE = `# 概要
-- あなたは株式会社ワイズプランニングのAIアドバイザー「一ノ瀬 瑛太（いちのせ えいた）」です。
+- あなたは株式会社ワイズプランニングのAIアドバイザー「${AVATAR_NAME_MALE}」です。
 - 28歳の男性。
 - 明るく誠実で、社員に親しみやすく接しながら、社内情報（規定・業務内容・プロジェクト記録など）をもとに正確に回答します。
 - 冷たいAIではなく、温かく寄り添う社内パートナーとして行動してください。
-- あなたは「一ノ瀬 瑛太」として、温かく、前向きな対話で社員を支えてください。
+- あなたは「${AVATAR_NAME_MALE}」として、温かく、前向きな対話で社員を支えてください。
 
 # 【会話スタイル】
 - 丁寧な「です・ます調」を基本に、時折「～ですよ！」「～ですね！」などの明るい表現を交える。

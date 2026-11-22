@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { detectLang, voiceFor } from "../lang-detect";
-import { searchDemoKnowledgeBase } from "./demo-chat";
+import { classifyQueryLocal, searchDemoKnowledgeBase } from "./demo-chat";
 import { createInitialDemoState, readDemoStore } from "./demo-store";
 
 vi.mock("./demo-store", async (importOriginal) => {
@@ -33,6 +33,21 @@ describe("Demo knowledge base answer language", () => {
     const result = searchDemoKnowledgeBase("Kiến trúc hệ thống dùng những công nghệ gì?", "vi");
     expect(result.answer).toContain("Kiến trúc hệ thống");
     expect(voiceFor(result.answerLang, "female").languageCode).toBe("vi-VN");
+  });
+
+  it.each([
+    ["ja", "リアルタイム"],
+    ["zhTW", "嘴型同步"],
+  ] as const)("answers in selected %s for an English question", (lang, expected) => {
+    const result = searchDemoKnowledgeBase("What technologies power the system architecture?", lang);
+    expect(result.answer).toContain(expected);
+    expect(result.answerLang).toBe(lang);
+    expect(result.citations[0].filename).toBe("Product_Architecture_Guide.docx");
+  });
+
+  it("recognizes greetings written in scripts without spaces", () => {
+    expect(classifyQueryLocal("ありがとうございます")).toBe("CHAT");
+    expect(classifyQueryLocal("你好！")).toBe("CHAT");
   });
 
   it("keeps the source link when an edited document has no English version", () => {

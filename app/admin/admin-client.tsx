@@ -1,8 +1,11 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { KbFilePreview, kbOriginalUrl, kbSourceLink } from "@/components/kb-file-preview";
 import { backgroundImageMediaType, BACKGROUND_IMAGE_ACCEPT, MAX_BACKGROUND_IMAGE_BYTES } from "@/lib/backgrounds";
 import { listenForLogout, logout } from "@/lib/client-auth";
+import { formatKbFileSize, kbPreviewKind, KB_STORAGE_QUOTA_BYTES } from "@/lib/kb-file";
+import type { DemoFile as FileItem } from "@/lib/server/demo-store";
 import {
   LayoutDashboard,
   Settings,
@@ -17,13 +20,11 @@ import {
   Search,
   FileText,
   Trash2,
-  Download,
   Eye,
   CheckCircle2,
   Layers,
   MessageSquare,
   Shield,
-  ExternalLink,
   X,
   RefreshCw,
   Plus,
@@ -82,19 +83,6 @@ const settingsSectionTitleClassName = "text-xl font-semibold leading-7 tracking-
 const settingsDescriptionClassName = "text-sm leading-5 text-slate-600";
 const settingsControlClassName = "block h-10 w-full rounded-lg border border-slate-200 bg-white px-3.5 text-base font-normal leading-6 focus:outline-none focus:ring-2 focus:ring-blue-500";
 const settingsCardClassName = "min-w-0 rounded-xl border border-slate-200/80 bg-white p-4 shadow-xs sm:px-6";
-
-interface FileItem {
-  id: number;
-  filename: string;
-  size: string;
-  sizeBytes: number;
-  status: "pending" | "processing" | "done" | "failed" | "not_indexed";
-  updated: string;
-  folder: string;
-  sourceUrl?: string;
-  rawContent?: string;
-  deleted?: boolean;
-}
 
 interface LexemeItem {
   id: number;
@@ -384,9 +372,12 @@ const t = {
     chooseFileBtn: "Chọn tệp",
     noFileChosen: "Chưa chọn tệp nào",
     selectedFilesLabel: "Đã chọn",
-    toastDownloading: "Đang tải xuống {0}...",
-    toastDownloaded: "Đã tải xuống {0}",
-    defaultDocPreview: "Nội dung tài liệu đã được lập chỉ mục trong cơ sở dữ liệu vector Qdrant.",
+    uploadingFile: "Đang tải lên…",
+    alertUploadFailed: "Không thể tải tệp lên. Vui lòng thử lại.",
+    previewLoading: "Đang mở tài liệu…",
+    previewMissing: "Không tìm thấy tệp gốc. Hãy tải lại tệp để xem nội dung.",
+    previewFailed: "Không thể hiển thị tài liệu này.",
+    previewEmpty: "Trang tính này chưa có dữ liệu.",
     langJa: "Tiếng Nhật (ja)",
     langEn: "Tiếng Anh (en)",
     langVi: "Tiếng Việt (vi)",
@@ -412,7 +403,6 @@ const t = {
     defaultLexicon: "Nhịp điệu chuẩn mực",
     defaultPrecision: "Chính xác & ngắn gọn",
     defaultBoundaries: "Chỉ dựa trên dữ liệu trong kho tri thức",
-    uploadedFileSampleContent: "Nội dung văn bản trích xuất mẫu từ tài liệu {0}. Tài liệu doanh nghiệp đã được xác minh và lập chỉ mục trong cơ sở dữ liệu vector Qdrant.",
     uploadedUrlSampleContent: "Tài liệu thu thập từ liên kết {0}. Đã tiền xử lý và lập chỉ mục cho truy vấn ngữ cảnh RAG.",
     ocrSampleResult: "[Kết quả OCR - {0}]\nCông ty Cổ phần AI Mind Technology - Quyết định số 0402346569/QĐ-AIMIND\nĐiều 1: Quy định nội bộ về sử dụng mô hình AI tạo sinh, nhúng vector và bảo mật kho tri thức doanh nghiệp.\nĐiều 2: Toàn bộ nhân sự tương tác với trợ lý ảo AI phải tuân thủ nghiêm ngặt quy trình an toàn thông tin.",
   },
@@ -676,9 +666,12 @@ const t = {
     chooseFileBtn: "Choose file",
     noFileChosen: "No file chosen",
     selectedFilesLabel: "Selected",
-    toastDownloading: "Starting download for {0}...",
-    toastDownloaded: "Downloaded {0}",
-    defaultDocPreview: "Document content indexed in vector database Qdrant.",
+    uploadingFile: "Uploading…",
+    alertUploadFailed: "Failed to upload files. Please try again.",
+    previewLoading: "Opening document…",
+    previewMissing: "The original file is unavailable. Upload it again to preview its contents.",
+    previewFailed: "This document could not be displayed.",
+    previewEmpty: "This sheet is empty.",
     langJa: "Japanese (ja)",
     langEn: "English (en)",
     langVi: "Vietnamese (vi)",
@@ -704,7 +697,6 @@ const t = {
     defaultLexicon: "Standard rhythm",
     defaultPrecision: "Accurate & concise",
     defaultBoundaries: "Grounded strictly in knowledge base",
-    uploadedFileSampleContent: "Sample extracted text content from document {0}. Verified enterprise documentation indexed in Qdrant collection enterprise_kb.",
     uploadedUrlSampleContent: "Web scraped documentation imported from {0}. Preprocessed and embedded for RAG contextual retrieval.",
     ocrSampleResult: "[OCR Result - {0}]\nAI Mind Technology JSC - Decision No. 0402346569/QD-AIMIND\nArticle 1: Corporate regulations regarding generative AI models, vector embeddings, and enterprise knowledge confidentiality.\nArticle 2: All staff interacting with conversational AI kiosks must adhere to information security protocols.",
   },
@@ -958,9 +950,12 @@ const t = {
     chooseFileBtn: "ファイルを選択",
     noFileChosen: "選択されていません",
     selectedFilesLabel: "選択済み",
-    toastDownloading: "{0} のダウンロードを開始しました...",
-    toastDownloaded: "{0} をダウンロードしました",
-    defaultDocPreview: "ドキュメント内容はQdrantベクトルデータベースにインデックス済みです。",
+    uploadingFile: "アップロード中…",
+    alertUploadFailed: "ファイルをアップロードできませんでした。もう一度お試しください。",
+    previewLoading: "ドキュメントを開いています…",
+    previewMissing: "元のファイルが見つかりません。プレビューするには再度アップロードしてください。",
+    previewFailed: "このドキュメントは表示できません。",
+    previewEmpty: "このシートは空です。",
     langJa: "日本語 (ja)",
     langEn: "英語 (en)",
     langVi: "ベトナム語 (vi)",
@@ -986,7 +981,6 @@ const t = {
     defaultLexicon: "標準的なビジネス表現",
     defaultPrecision: "正確かつ簡潔",
     defaultBoundaries: "ナレッジベースの検証済み資料のみに基づき回答",
-    uploadedFileSampleContent: "ドキュメント {0} から抽出されたサンプルテキストです。検証済みの社内資料としてQdrantベクトルデータベースにインデックスされています。",
     uploadedUrlSampleContent: "{0} から取り込まれたWebドキュメントです。RAGコンテキスト検索用に前処理およびベクトル化されています。",
     ocrSampleResult: "[OCR抽出結果 - {0}]\nAI Mind Technology株式会社 - 規定第0402346569号\n第1条：生成AIモデル、ベクトル埋め込み、および社内ナレッジの機密保持に関する規定。\n第2条：対話型AIキオスクを利用する全社員は情報セキュリティ手順を遵守するものとします。",
   },
@@ -1240,9 +1234,12 @@ const t = {
     chooseFileBtn: "选择文件",
     noFileChosen: "未选择任何文件",
     selectedFilesLabel: "已选择",
-    toastDownloading: "正在开始下载 {0}...",
-    toastDownloaded: "已下载 {0}",
-    defaultDocPreview: "文档内容已在 Qdrant 向量数据库中建立索引。",
+    uploadingFile: "正在上傳…",
+    alertUploadFailed: "上傳檔案失敗。請重試。",
+    previewLoading: "正在開啟文件…",
+    previewMissing: "找不到原始檔案。請重新上傳以預覽內容。",
+    previewFailed: "無法顯示此文件。",
+    previewEmpty: "此工作表沒有資料。",
     langJa: "日语 (ja)",
     langEn: "英语 (en)",
     langVi: "越南语 (vi)",
@@ -1268,7 +1265,6 @@ const t = {
     defaultLexicon: "标准企业用语",
     defaultPrecision: "准确且简洁",
     defaultBoundaries: "严格依据知识库已验证资料回答",
-    uploadedFileSampleContent: "从文档 {0} 提取的示例文本内容。已作为验证的企业资料在 Qdrant 向量数据库中建立索引。",
     uploadedUrlSampleContent: "从网址 {0} 导入的网页文档。已完成预处理并向量化，用于 RAG 上下文检索。",
     ocrSampleResult: "[OCR 识别结果 - {0}]\nAI Mind Technology 股份公司 - 第 0402346569 号决议\n第一条：关于生成式 AI 模型、向量嵌入及企业知识库保密的内部管理规定。\n第二条：所有与对话式 AI 终端交互的员工均须严格遵守信息安全规范。",
   },
@@ -1615,7 +1611,9 @@ export function AdminClient({
   const [deleteFileConfirmItem, setDeleteFileConfirmItem] = useState<FileItem | null>(null);
 
   // File Upload Form state
-  const [selectedUploadFiles, setSelectedUploadFiles] = useState<Array<{ name: string; size: number; type: string }>>([]);
+  const uploadFileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedUploadFiles, setSelectedUploadFiles] = useState<File[]>([]);
+  const [isUploadingFiles, setIsUploadingFiles] = useState(false);
   const [isDraggingUpload, setIsDraggingUpload] = useState(false);
   const [uploadTargetFolder, setUploadTargetFolder] = useState("root");
   const [customUploadFolder, setCustomUploadFolder] = useState("");
@@ -1634,14 +1632,6 @@ export function AdminClient({
   const [ocrStatus, setOcrStatus] = useState<"idle" | "running" | "done">("idle");
   const [ocrExtractedText, setOcrExtractedText] = useState("");
 
-  const STORAGE_QUOTA_BYTES = 1024 * 1024 * 1024; // 1.0 GB
-  const formatFileSize = (bytes: number) => {
-    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  };
-  const isSupportedUploadFile = (name: string, mimeType: string) =>
-    mimeType.startsWith("image/") ||
-    /\.(pdf|docx|xlsx|html?|txt|md|png|jpe?g|webp|gif|bmp|svg)$/i.test(name);
   const isSupportedOcrFile = (name: string, mimeType: string) =>
     mimeType.startsWith("image/") ||
     /\.(png|jpe?g|webp|gif|bmp|tiff?|svg|pdf|html?|txt)$/i.test(name);
@@ -1650,43 +1640,53 @@ export function AdminClient({
   const activeFiles = files.filter((f) => !f.deleted);
   const totalBytes = activeFiles.reduce((acc, f) => acc + f.sizeBytes, 0);
   const quotaMb = (totalBytes / (1024 * 1024)).toFixed(1);
-  const quotaPercentage = ((totalBytes / STORAGE_QUOTA_BYTES) * 100).toFixed(1);
+  const quotaPercentage = ((totalBytes / KB_STORAGE_QUOTA_BYTES) * 100).toFixed(1);
 
-  const handleUploadFileSubmit = () => {
+  const closeFileUpload = () => {
+    setIsUploadFileModalOpen(false);
+    setSelectedUploadFiles([]);
+    setIsDraggingUpload(false);
+  };
+
+  const handleUploadFileSubmit = async () => {
+    if (isUploadingFiles) return;
     if (selectedUploadFiles.length === 0) {
       showToast(text.alertSelectFile, "error");
       return;
     }
     // Validate file formats (BR-UC2-02 / Exc 6b)
-    if (selectedUploadFiles.some((f) => !isSupportedUploadFile(f.name, f.type))) {
+    if (selectedUploadFiles.some((file) => !kbPreviewKind(file.name, file.type))) {
       showToast(text.alertUnsupportedFormat, "error");
       return;
     }
     // Check quota (1.0 GB limit)
-    const incomingBytes = selectedUploadFiles.reduce((sum, f) => sum + (f.size || 665600), 0);
-    if (totalBytes + incomingBytes > STORAGE_QUOTA_BYTES) {
+    const incomingBytes = selectedUploadFiles.reduce((sum, file) => sum + file.size, 0);
+    if (totalBytes + incomingBytes > KB_STORAGE_QUOTA_BYTES) {
       showToast(text.alertStorageQuota, "error");
       return;
     }
     const finalFolder = customUploadFolder.trim() || uploadTargetFolder;
-    const newFiles: FileItem[] = selectedUploadFiles.map((fileMeta, idx) => {
-      const sizeBytes = fileMeta.size || 665600;
-      return {
-        id: Math.max(...files.map((f) => f.id), 0) + idx + 1,
-        filename: fileMeta.name,
-        size: formatFileSize(sizeBytes),
-        sizeBytes,
-        status: "done",
-        updated: new Date().toISOString().replace("T", " ").slice(0, 16),
-        folder: finalFolder,
-        rawContent: text.uploadedFileSampleContent.replace("{0}", fileMeta.name),
-      };
-    });
-    setFiles((prev) => [...newFiles, ...prev]);
-    showToast(text.alertUploadSuccess, "success");
-    setIsUploadFileModalOpen(false);
-    setSelectedUploadFiles([]);
-    setCustomUploadFolder("");
+    const form = new FormData();
+    form.set("folder", finalFolder);
+    selectedUploadFiles.forEach((file) => form.append("file", file));
+    setIsUploadingFiles(true);
+    try {
+      const response = await fetch("/api/admin/files", { method: "POST", body: form });
+      if (response.status === 413 || response.status === 415) {
+        showToast(response.status === 413 ? text.alertStorageQuota : text.alertUnsupportedFormat, "error");
+        return;
+      }
+      if (!response.ok) throw new Error("Upload failed");
+      const result = (await response.json()) as { files: FileItem[] };
+      setFiles((previous) => [...result.files, ...previous]);
+      showToast(text.alertUploadSuccess, "success");
+      closeFileUpload();
+      setCustomUploadFolder("");
+    } catch {
+      showToast(text.alertUploadFailed, "error");
+    } finally {
+      setIsUploadingFiles(false);
+    }
   };
 
   const handleUploadUrlSubmit = () => {
@@ -1762,7 +1762,7 @@ export function AdminClient({
       showToast(text.alertOcrUnsupportedFormat, "error");
       return false;
     }
-    if (totalBytes + file.size > STORAGE_QUOTA_BYTES) {
+    if (totalBytes + file.size > KB_STORAGE_QUOTA_BYTES) {
       setOcrSelectedFile("");
       setOcrSelectedFileSize(0);
       showToast(text.alertStorageQuota, "error");
@@ -1778,7 +1778,7 @@ export function AdminClient({
       showToast(text.alertSelectFile, "error");
       return;
     }
-    if (totalBytes + ocrSelectedFileSize > STORAGE_QUOTA_BYTES) {
+    if (totalBytes + ocrSelectedFileSize > KB_STORAGE_QUOTA_BYTES) {
       showToast(text.alertStorageQuota, "error");
       return;
     }
@@ -1797,14 +1797,14 @@ export function AdminClient({
       return;
     }
     const textBytes = Math.max(1024, new Blob([ocrExtractedText]).size);
-    if (totalBytes + textBytes > STORAGE_QUOTA_BYTES) {
+    if (totalBytes + textBytes > KB_STORAGE_QUOTA_BYTES) {
       showToast(text.alertStorageQuota, "error");
       return;
     }
     const newFile: FileItem = {
       id: Math.max(...files.map((f) => f.id), 0) + 1,
       filename: ocrSelectedFile ? `OCR_${ocrSelectedFile.replace(/\.[^/.]+$/, "")}.txt` : `OCR_Extracted_${Date.now()}.txt`,
-      size: formatFileSize(textBytes),
+      size: formatKbFileSize(textBytes),
       sizeBytes: textBytes,
       status: ocrAutoIndex ? "done" : "not_indexed",
       updated: new Date().toISOString().replace("T", " ").slice(0, 16),
@@ -2978,13 +2978,15 @@ export function AdminClient({
                                     >
                                       <Eye className="w-3.5 h-3.5" />
                                     </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => showToast(text.toastDownloading.replace("{0}", file.filename), "info")}
+                                    <a
+                                      href={kbSourceLink(file.sourceUrl) ?? kbOriginalUrl(file)}
+                                      download={file.sourceUrl ? undefined : file.filename}
+                                      target={file.sourceUrl ? "_blank" : undefined}
+                                      rel="noreferrer"
                                       className="px-3 py-1 bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 rounded-md text-xs font-medium whitespace-nowrap transition-colors cursor-pointer shadow-2xs"
                                     >
-                                      {text.btnDownload}
-                                    </button>
+                                      {file.sourceUrl ? text.btnOpenLink : text.btnDownload}
+                                    </a>
                                   </div>
                                   <div className="flex items-center gap-1.5">
                                     <button
@@ -3921,7 +3923,8 @@ export function AdminClient({
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <h3 className="font-bold text-slate-900 text-base">{text.uploadFileModalTitle}</h3>
               <button
-                onClick={() => setIsUploadFileModalOpen(false)}
+                disabled={isUploadingFiles}
+                onClick={closeFileUpload}
                 className="text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -3950,13 +3953,8 @@ export function AdminClient({
                   e.preventDefault();
                   e.stopPropagation();
                   setIsDraggingUpload(false);
-                  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                    const dropped = Array.from(e.dataTransfer.files).map((f) => ({
-                      name: f.name,
-                      size: f.size,
-                      type: f.type,
-                    }));
-                    setSelectedUploadFiles(dropped);
+                  if (!isUploadingFiles && e.dataTransfer.files.length > 0) {
+                    setSelectedUploadFiles(Array.from(e.dataTransfer.files));
                   }
                 }}
                 className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
@@ -3966,25 +3964,28 @@ export function AdminClient({
                 }`}
               >
                 <Upload className="w-8 h-8 text-blue-500 mx-auto mb-2" />
-                <label className="text-xs font-bold text-blue-600 hover:underline cursor-pointer block mb-1">
-                  <span>{text.chooseFiles}</span>
-                  <input
-                    type="file"
-                    multiple
-                    accept=".pdf,.docx,.xlsx,.html,.txt,.md,image/*"
-                    onChange={(e) => {
-                      if (e.target.files) {
-                        const picked = Array.from(e.target.files).map((f) => ({
-                          name: f.name,
-                          size: f.size,
-                          type: f.type,
-                        }));
-                        setSelectedUploadFiles(picked);
-                      }
-                    }}
-                    className="hidden"
-                  />
-                </label>
+                <input
+                  ref={uploadFileInputRef}
+                  type="file"
+                  multiple
+                  disabled={isUploadingFiles}
+                  accept=".pdf,.docx,.xlsx,.html,.htm,.txt,.md,.csv,image/*"
+                  onChange={(event) => {
+                    const input = event.currentTarget;
+                    const picked = Array.from(input.files ?? []);
+                    input.value = "";
+                    if (picked.length) setSelectedUploadFiles(picked);
+                  }}
+                  hidden
+                />
+                <button
+                  type="button"
+                  disabled={isUploadingFiles}
+                  onClick={() => uploadFileInputRef.current?.click()}
+                  className="mb-1 inline-flex rounded px-2 py-1 text-xs font-bold text-blue-600 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 enabled:cursor-pointer disabled:opacity-50"
+                >
+                  {text.chooseFiles}
+                </button>
                 <p className="text-[11px] text-slate-400">{text.dragDropHint}</p>
                 {selectedUploadFiles.length > 0 && (
                   <div className="mt-3 p-2 bg-blue-50 rounded-lg text-left text-[11px] text-blue-700 font-medium">
@@ -4020,16 +4021,18 @@ export function AdminClient({
 
             <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-2.5">
               <button
-                onClick={() => setIsUploadFileModalOpen(false)}
+                disabled={isUploadingFiles}
+                onClick={closeFileUpload}
                 className="px-4 py-2 border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg cursor-pointer"
               >
                 {text.btnCancel}
               </button>
               <button
-                onClick={handleUploadFileSubmit}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm cursor-pointer"
+                disabled={isUploadingFiles}
+                onClick={() => void handleUploadFileSubmit()}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm cursor-pointer disabled:opacity-50"
               >
-                {text.btnUpload}
+                {isUploadingFiles ? text.uploadingFile : text.btnUpload}
               </button>
             </div>
           </div>
@@ -4120,64 +4123,12 @@ export function AdminClient({
 
       {/* MODAL 5: PREVIEW FILE (UC 2.4) */}
       {previewFileItem && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-xl overflow-hidden animate-scaleIn">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <FileText className="w-4 h-4 text-blue-600" />
-                <h3 className="font-bold text-slate-900 text-sm truncate max-w-md">
-                  {previewFileItem.filename}
-                </h3>
-              </div>
-              <button
-                onClick={() => setPreviewFileItem(null)}
-                className="text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
-              <div className="text-xs text-slate-500 flex gap-4 border-b border-slate-100 pb-3">
-                <span>{text.thFolder}: <strong>{previewFileItem.folder}</strong></span>
-                <span>{text.thFileSize}: <strong>{previewFileItem.size}</strong></span>
-                <span>{text.thUpdated}: <strong>{previewFileItem.updated}</strong></span>
-              </div>
-              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 font-mono text-xs text-slate-800 leading-relaxed whitespace-pre-wrap">
-                {previewFileItem.rawContent || text.defaultDocPreview}
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-between items-center">
-              <div>
-                {previewFileItem.sourceUrl && (
-                  <button
-                    onClick={() => window.open(previewFileItem.sourceUrl, "_blank")}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded text-xs font-semibold text-blue-600 hover:bg-slate-100 cursor-pointer"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>{text.btnOpenLink}</span>
-                  </button>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => showToast(text.toastDownloaded.replace("{0}", previewFileItem.filename), "info")}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded text-xs font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>{text.btnDownload}</span>
-                </button>
-                <button
-                  onClick={() => setPreviewFileItem(null)}
-                  className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded text-xs font-semibold cursor-pointer"
-                >
-                  {text.btnCancel}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <KbFilePreview
+          key={previewFileItem.id}
+          file={previewFileItem}
+          labels={text}
+          onClose={() => setPreviewFileItem(null)}
+        />
       )}
 
       {/* MODAL 6: CONFIRM DELETE FILE (UC 2.7) */}

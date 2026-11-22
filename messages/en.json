@@ -1,6 +1,6 @@
 {
   "greeting": "Hello! I'm {name}. How may I help you today? Use the mic or text input below.",
-  "avatarNameMale": "Ichinose",
+  "avatarNameMale": "Lee",
   "bottomBar": {
     "placeholder": "Type a question or press and hold the mic to speak",
     "recognizing": "Recognizing…",
@@ -51,7 +51,7 @@
     "futureNote": "Language, voice and model controls will arrive in a future release.",
     "genderLabel": "Avatar",
     "genderFemale": "Female (Chi)",
-    "genderMale": "Male (Eita)",
+    "genderMale": "Male (Lee)",
     "logout": "Sign out",
     "logoutFailed": "Logout failed. Please try again."
   },
@@ -81,6 +81,11 @@
   "errors": {
     "speechUnsupported": "Voice input is not supported in this browser. Please use Chrome or Edge.",
     "micPermissionDenied": "Microphone access was denied. Please check your browser settings.",
-    "speechUnavailable": "Could not play the reply in its language."
+    "speechUnavailable": "Could not play the voice in {language}.",
+    "speechVoiceMissing": "This browser has no voice for {language}. You can still read the reply.",
+    "translationUnavailable": "Translation is unavailable because the service has not been configured.",
+    "translationDemoUnavailable": "Browser translation is unavailable. For the demo, try ‘Hello’ with English and Vietnamese selected.",
+    "translationFailed": "Could not translate the message. Please try again.",
+    "chatFailed": "Failed to generate a response. Please try again."
   }
 }

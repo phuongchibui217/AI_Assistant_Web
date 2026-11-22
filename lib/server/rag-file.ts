@@ -13,7 +13,7 @@ const PASS = process.env.RAG_SERVICE_PASS ?? "admin";
 type AuthCache = { token: string; expiresAt: number };
 let authCache: AuthCache | null = null;
 
-export async function login(): Promise<string> {
+export async function login(signal?: AbortSignal): Promise<string> {
   const now = Date.now();
   if (authCache && authCache.expiresAt > now + 60_000) return authCache.token;
   const res = await fetch(`${BASE}/api/auth/login`, {
@@ -21,6 +21,7 @@ export async function login(): Promise<string> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email: USER, password: PASS }),
     cache: "no-store",
+    signal,
   });
   if (!res.ok) throw new Error(`auth login failed: ${res.status}`);
   const json = (await res.json()) as { access_token?: string; expires_in?: number };
@@ -30,11 +31,11 @@ export async function login(): Promise<string> {
   return authCache.token;
 }
 
-export async function resolveFilenameToUrl(filename: string): Promise<string | null> {
-  const token = await login();
+export async function resolveFilenameToUrl(filename: string, signal?: AbortSignal): Promise<string | null> {
+  const token = await login(signal);
   const headers = { authorization: `Bearer ${token}` };
 
-  const listRes = await fetch(`${BASE}/api/files`, { headers, cache: "no-store" });
+  const listRes = await fetch(`${BASE}/api/files`, { headers, cache: "no-store", signal });
   if (!listRes.ok) throw new Error(`file list failed: ${listRes.status}`);
   const list = (await listRes.json()) as {
     files: Array<{ id: number; filename: string; original_name?: string; storage_key?: string }>;
@@ -51,6 +52,7 @@ export async function resolveFilenameToUrl(filename: string): Promise<string | n
   const urlRes = await fetch(`${BASE}/api/files/${match.id}/url`, {
     headers,
     cache: "no-store",
+    signal,
   });
   if (!urlRes.ok) throw new Error(`file url failed: ${urlRes.status}`);
   const urlJson = (await urlRes.json()) as { url?: string };

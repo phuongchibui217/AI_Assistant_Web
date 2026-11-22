@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 
-import { detectLangConfident, sttLangToSupported } from "@/lib/lang-detect";
+import { detectLangConfident, detectSpeechLang, hasReplyLanguageConflict, sttLangToSupported } from "@/lib/lang-detect";
 import { AVATAR_NAME } from "@/lib/persona";
+import { AVATAR_NAME_MALE } from "@/lib/persona-male";
 import { getActiveAssistant } from "@/lib/server/active-assistant";
 import { generateDemoChitchat } from "@/lib/server/demo-chat";
-import { generateFlashContent, FlashError } from "@/lib/server/gemini-flash";
+import { generateFlashContent } from "@/lib/server/gemini-flash";
 import { CHITCHAT_MODEL } from "@/lib/server/models";
+import { translateText } from "@/lib/server/translate";
 
 const LANG_NAMES: Record<string, string> = {
   ja: "Japanese (日本語)",
@@ -31,9 +33,7 @@ const LANG_NAMES: Record<string, string> = {
  * audio now routes through Cloud TTS Neural2 and chitchat is generated with
  * a normal Flash REST call.
  *
- * Returns `{ text: string }`. The client picks the language from the answer
- * text (same `detectLang` path RAG uses) and synthesises through
- * `/api/tts/synthesize`.
+ * Returns the reply and its language for speech synthesis.
  */
 
 // Per-gender self-identity for the chitchat persona. The avatar gender is
@@ -47,9 +47,9 @@ const CHITCHAT_PERSONA = {
     selfIntro: AVATAR_NAME,
   },
   male: {
-    nameReading: "一ノ瀬 瑛太（いちのせ えいた）",
+    nameReading: AVATAR_NAME_MALE,
     profile: "28歳の男性",
-    selfIntro: "一ノ瀬瑛太",
+    selfIntro: AVATAR_NAME_MALE,
   },
 } as const;
 
@@ -132,6 +132,10 @@ export async function POST(req: Request): Promise<Response> {
   const detection = langHint ? { lang: langHint, confident: true } : detectLangConfident(query);
   const lang = detection.lang;
   const gender = payload.gender === "male" ? "male" : "female";
+  const demoReply = () => {
+    const text = generateDemoChitchat(query, lang, gender);
+    return NextResponse.json({ text, answerLang: detectSpeechLang(text, lang), demo: true });
+  };
   try {
     const langName = LANG_NAMES[lang] ?? lang;
 
@@ -162,23 +166,19 @@ export async function POST(req: Request): Promise<Response> {
     }
     const langDirective = detection.confident
       ? `【回答言語】 ${lang} (${langName}). The reply MUST be written entirely in ${langName}. Do not mix in greetings or words from other languages. This is a hard rule.`
-      : `【回答言語】 Reply in EXACTLY the same language as the user's utterance (【今回のユーザー発話】 below). If it is Chinese, match the same character variant (Simplified vs Traditional). Do not mix in words from other languages. This is a hard rule.`;
+      : `【回答言語】 Reply in the language of the current user message (【今回のユーザー発話】 below). If it is Chinese, match its character variant. When the language is ambiguous, use ${langName}. Use one language throughout.`;
     const userPrompt = `【現在日時】 ${nowJst} (JST)\n${langDirective}\n\n${historyBlock}【今回のユーザー発話】\n${query}`;
-    // Append admin-managed persona/stance instruction AFTER the hardcoded
-    // baseline so it acts as a session-level override. LLMs weight later
-    // instructions more heavily; the hardcoded prompt provides default tone
-    // + language rules, the admin block can supersede any conflict.
-    // Avatar gender (chosen client-side) picks the self-identity persona.
     if (!process.env.GEMINI_API_KEY) {
-      return NextResponse.json({ text: generateDemoChitchat(query, lang, gender), demo: true });
+      return demoReply();
     }
     const assistant = await getActiveAssistant();
     const baseSystemPrompt = assistant?.chitchat_override
       ? applyPersonaTemplate(assistant.chitchat_override, gender)
       : buildChitchatSystemPrompt(gender);
-    const systemInstruction = assistant?.system_instruction
-      ? `${baseSystemPrompt}\n\n# Session override (admin-configured persona + active stance)\nThe following rules SUPERSEDE any conflicting rule above. Apply them strictly.\n\n${assistant.system_instruction}`
-      : baseSystemPrompt;
+    const sessionInstruction = assistant?.system_instruction
+      ? `\n\n# Session persona and active stance\nUse these settings for the assistant's behavior and tone.\n\n${assistant.system_instruction}`
+      : "";
+    const systemInstruction = `${baseSystemPrompt}${sessionInstruction}\n\n# Required reply language\n${langDirective}\nThis language rule takes precedence over the persona, stance, examples, and previous messages.`;
 
     const flash = await generateFlashContent(
       userPrompt,
@@ -191,14 +191,18 @@ export async function POST(req: Request): Promise<Response> {
       },
       req.signal,
     );
-    return NextResponse.json({ text: flash.text.trim() });
+    let text = flash.text.trim();
+    if (!text) return demoReply();
+    if (detection.confident && hasReplyLanguageConflict(text, lang)) {
+      text = await translateText(text, lang, req.signal);
+      if (hasReplyLanguageConflict(text, lang)) return demoReply();
+    }
+    const answerLang = detection.confident ? lang : detectSpeechLang(text, lang);
+    return NextResponse.json({ text, answerLang });
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       return NextResponse.json({ error: "Aborted" }, { status: 499 });
     }
-    return NextResponse.json({
-      text: generateDemoChitchat(query, lang, gender),
-      demo: true,
-    });
+    return demoReply();
   }
 }

@@ -1,17 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type * as THREE from "three";
-import { FEMALE } from "./characters";
+import { FEMALE, MALE } from "./characters";
+import { LipSyncDriver } from "./lip-sync";
 import { MouthAnimator, type MouthFadeTuning } from "./mouth-animator";
+import { makeMouthFeather } from "./renderer";
 
 function makeFakeMesh() {
   return {
     material: { opacity: 0 },
     renderOrder: 0,
+    visible: true,
   } as unknown as THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
 }
 
-function createHarness(tuning?: MouthFadeTuning) {
-  const cycle = Array.from({ length: 6 }, () => makeFakeMesh());
+function createHarness(tuning?: MouthFadeTuning, poseCount = 6) {
+  const cycle = Array.from({ length: poseCount }, () => makeFakeMesh());
   const silentClosed = makeFakeMesh();
   const silentOpen = makeFakeMesh();
   const animator = new MouthAnimator(
@@ -135,6 +138,34 @@ describe("MouthAnimator (amplitude mode lip-sync)", () => {
   });
 });
 
+describe("Lee avatar mouth transitions", () => {
+  it("renders one authored pose during speech and return to rest", () => {
+    const { animator, cycle, silentClosed, silentOpen } = createHarness(
+      MALE.mouth,
+      MALE.mouth.cycle.length,
+    );
+    const visiblePoses = [silentClosed, silentOpen, ...cycle];
+    const visited = new Set<number>();
+    const step = () => {
+      animator.update(1 / 60);
+      expect(visiblePoses.map((pose) => pose.material.opacity).filter(Boolean)).toEqual([1]);
+      expect(visiblePoses.filter((pose) => pose.visible)).toHaveLength(1);
+      visited.add(cycle.findIndex((pose) => pose.material.opacity === 1));
+    };
+
+    animator.setSyntheticSpeaking(true);
+    animator.setSyntheticOpenness(1);
+    for (let frame = 0; frame < 16; frame++) step();
+    expect([...visited].some((index) => index % 2 === 1)).toBe(true);
+    expect(cycle.at(-1)?.material.opacity).toBe(1);
+
+    animator.setSyntheticSpeaking(false);
+    for (let frame = 0; frame < 6; frame++) step();
+    expect(silentClosed.material.opacity).toBe(1);
+    expect(cycle.every((pose) => pose.material.opacity === 0)).toBe(true);
+  });
+});
+
 describe("Female avatar mouth transitions", () => {
   it("blends adjacent poses, limits loud peaks, and eases shut during a pause", () => {
     const { animator, cycle, silentClosed } = createHarness(FEMALE.mouth);
@@ -149,8 +180,8 @@ describe("Female avatar mouth transitions", () => {
       expect(poses[1]).toBe(poses[0] + 1);
       expect(cycle[5].material.opacity).toBe(0);
     }
-    expect(getVisiblePoses()).toEqual([3, 4]);
-    expect(cycle[4].material.opacity).toBeCloseTo(0.2, 2);
+    expect(getVisiblePoses()).toEqual([2, 3]);
+    expect(cycle[3].material.opacity).toBeCloseTo(0.9, 2);
     expect(silentClosed.material.opacity).toBe(0);
 
     animator.setOpenness(0);
@@ -177,5 +208,42 @@ describe("Female avatar mouth transitions", () => {
     for (let frame = 0; frame < 12; frame++) animator.update(1 / 60);
     expect(silentClosed.material.opacity).toBe(1);
     expect(cycle.every((mesh) => mesh.material.opacity === 0)).toBe(true);
+  });
+
+  it("keeps moving layers out of the philtrum and feathers them into the upper lip", () => {
+    const { start, end } = FEMALE.mouth.upperEdgeFeather!;
+    const mask = makeMouthFeather(512, start, end);
+    const pixels = mask.image.data as Uint8Array;
+    const alphaAt = (spriteY: number) => pixels[(511 - spriteY) * 4 + 1];
+    expect(alphaAt(300)).toBe(0);
+    expect(alphaAt(304)).toBe(0);
+    expect(alphaAt(307)).toBeGreaterThan(0);
+    expect(alphaAt(307)).toBeLessThan(255);
+    expect(alphaAt(312)).toBe(255);
+    mask.dispose();
+  });
+
+  it("animates quiet PCM and closes promptly when the playback queue ends", () => {
+    const { animator, cycle, silentClosed } = createHarness(FEMALE.mouth);
+    const analyser = {
+      fftSize: 32,
+      getFloatTimeDomainData: (data: Float32Array) => data.fill(0.013),
+    } as unknown as AnalyserNode;
+    let hasPlayback = true;
+    const driver = new LipSyncDriver(analyser, animator, undefined, undefined, () => hasPlayback);
+    const step = () => { driver.update(1 / 60); animator.update(1 / 60); };
+    for (let i = 0; i < 12; i++) step();
+    expect(silentClosed.material.opacity).toBe(0);
+    expect(cycle.slice(1).some((mesh) => mesh.material.opacity > 0)).toBe(true);
+
+    // The analyser still has the tail sample, but it can no longer open the mouth.
+    hasPlayback = false;
+    for (let i = 0; i < 4; i++) step();
+    expect(silentClosed.material.opacity).toBe(1);
+    expect(cycle.every((mesh) => mesh.material.opacity === 0)).toBe(true);
+
+    hasPlayback = true;
+    for (let i = 0; i < 12; i++) step();
+    expect(silentClosed.material.opacity).toBe(0);
   });
 });

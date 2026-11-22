@@ -3,6 +3,7 @@ import * as THREE from "three";
 import {
   AvatarRenderer,
   loadTextures,
+  makeMouthFeather,
   makeSpritePlane,
 } from "./renderer";
 import { LAYOUT_W, LAYOUT_H, pixiToThree } from "./positions";
@@ -38,6 +39,7 @@ export class Avatar {
   private eyebrowAnimator!: EyebrowAnimator;
   private headSway!: HeadSwayAnimator;
   private lipSync: LipSyncDriver | null = null;
+  private mouthFeather: THREE.DataTexture | undefined;
 
   private swayGroup!: THREE.Group;
   private bodyGroup!: THREE.Group;
@@ -66,6 +68,8 @@ export class Avatar {
   private readonly rootOffset = { x: 0, y: 0 };
 
   private loaded = false;
+  private disposed = false;
+  private textures: Map<string, THREE.Texture> | undefined;
   private speakingOverride = false;
 
   constructor(canvas: HTMLCanvasElement, config: CharacterConfig = FEMALE) {
@@ -77,6 +81,19 @@ export class Avatar {
   async load(): Promise<void> {
     if (this.loaded) return;
     const textures = await loadTextures(characterUrls(this.config));
+    if (this.disposed) {
+      for (const texture of textures.values()) texture.dispose();
+      return;
+    }
+    this.textures = textures;
+    if (this.config.mouth.singleAmplitudePose) {
+      // Hidden poses aren't drawn at startup. Upload them now so changing
+      // pose during speech doesn't have to upload a texture on the same frame.
+      for (const url of [...this.config.mouth.cycle, ...(this.config.blink.closeFrames ?? [])]) {
+        const texture = textures.get(url);
+        if (texture) this.renderer.renderer.initTexture(texture);
+      }
+    }
     this.buildSceneGraph(textures);
     this.fitToCanvas();
     this.registerTickers();
@@ -93,7 +110,13 @@ export class Avatar {
   }
 
   dispose(): void {
+    this.disposed = true;
+    if (this.textures) {
+      for (const texture of this.textures.values()) texture.dispose();
+      this.textures = undefined;
+    }
     this.renderer.dispose();
+    this.mouthFeather?.dispose();
   }
 
   /**
@@ -104,7 +127,7 @@ export class Avatar {
    * Only replaces the LipSyncDriver — the ticker was registered once in
    * `registerTickers()` so reconnects never accumulate duplicate tickers.
    */
-  attachAnalyser(analyser: AnalyserNode): void {
+  attachAnalyser(analyser: AnalyserNode, hasPlayback?: () => boolean): void {
     // Lock gaze to eye contact while audio is playing; resume idle wandering
     // when it stops. Secondary motion: a small eyebrow raise on stressed
     // syllables (male only - it accompanies the amplitude-driven mouth).
@@ -117,11 +140,14 @@ export class Avatar {
       this.mouthAnimator,
       (speaking) => this.eyeGaze.setSpeaking(speaking),
       onAccent,
+      hasPlayback,
     );
   }
 
   /** Bypass amplitude-driven lip sync (e.g. browser speechSynthesis fallback). */
   setSpeakingOverride(speaking: boolean): void {
+    if (this.speakingOverride === speaking) return;
+    this.lipSync?.reset();
     this.speakingOverride = speaking;
     this.mouthAnimator.setSyntheticSpeaking(speaking);
     this.bodyAnimator.setSpeaking(speaking);
@@ -138,6 +164,12 @@ export class Avatar {
    */
   setSpeakingOpenness(openness: number | null): void {
     this.mouthAnimator.setSyntheticOpenness(openness);
+  }
+
+  stopSpeaking(): void {
+    if (this.speakingOverride) this.setSpeakingOverride(false);
+    else if (this.lipSync) this.lipSync.reset();
+    else this.mouthAnimator.stopSpeech();
   }
 
   onTalkStart(fromStandby = false): void {
@@ -306,7 +338,7 @@ export class Avatar {
 
     const bodyMeshes: { mesh: THREE.Object3D; layer: Layer }[] = [];
     for (const layer of c.body) {
-      const m = makeSpritePlane(tex(layer.url), 0);
+      const m = makeSpritePlane(tex(layer.url), 0, layer.bounds);
       place(m, layer.anchor, layer.z);
       this.bodyGroup.add(m);
       bodyMeshes.push({ mesh: m, layer });
@@ -334,7 +366,7 @@ export class Avatar {
     place(neckMesh, c.neck.anchor, c.neck.z);
     if (c.renderNeck !== false) this.swayGroup.add(neckMesh);
 
-    const faceMesh = makeSpritePlane(tex(c.face.url), 0);
+    const faceMesh = makeSpritePlane(tex(c.face.url), 0, c.face.bounds);
     placeHead(faceMesh, c.face.anchor, c.face.z);
     this.headGroup.add(faceMesh);
 
@@ -342,7 +374,7 @@ export class Avatar {
     const eyeBgMeshes = c.eyeBg.map((l) => {
       const m = makeSpritePlane(tex(l.url), 0);
       placeHead(m, l.anchor, l.z);
-      this.headGroup.add(m);
+      if (!c.bakedEyes) this.headGroup.add(m);
       return m;
     });
 
@@ -367,19 +399,19 @@ export class Avatar {
       0,
     );
     this.eyeballGroup.add(eyeballRightMesh);
-    this.headGroup.add(this.eyeballGroup);
+    if (!c.bakedEyes) this.headGroup.add(this.eyeballGroup);
 
     // Blink frames - 4 lid frames stacked at the blink anchor, alpha-blended by
     // the animator. All start hidden: the rest state shows the gaze eyes
     // underneath; lids only appear during a blink.
     const bf = c.blink.frames;
-    const blinkOpen = makeSpritePlane(tex(bf.open), 0);
+    const blinkOpen = makeSpritePlane(tex(bf.open), 0, c.blink.bounds);
     placeHead(blinkOpen, c.blink.anchor, c.blink.z);
-    const blinkOpenToClose = makeSpritePlane(tex(bf.openToClose), 0);
+    const blinkOpenToClose = makeSpritePlane(tex(bf.openToClose), 0, c.blink.bounds);
     placeHead(blinkOpenToClose, c.blink.anchor, c.blink.z + 0.001);
-    const blinkClose = makeSpritePlane(tex(bf.close), 0);
+    const blinkClose = makeSpritePlane(tex(bf.close), 0, c.blink.bounds);
     placeHead(blinkClose, c.blink.anchor, c.blink.z + 0.002);
-    const blinkCloseToOpen = makeSpritePlane(tex(bf.closeToOpen), 0);
+    const blinkCloseToOpen = makeSpritePlane(tex(bf.closeToOpen), 0, c.blink.bounds);
     placeHead(blinkCloseToOpen, c.blink.anchor, c.blink.z + 0.003);
     blinkOpen.material.opacity = 0;
     blinkOpenToClose.material.opacity = 0;
@@ -391,7 +423,7 @@ export class Avatar {
     // just above the 4-slot frames. The animator plays them forward then back
     // for a smooth eyelid close; the 4-slot frames stay hidden when set.
     const blinkSeq = (c.blink.closeFrames ?? []).map((url, i) => {
-      const m = makeSpritePlane(tex(url), 0);
+      const m = makeSpritePlane(tex(url), 0, c.blink.bounds);
       placeHead(m, c.blink.anchor, c.blink.z + 0.01 + i * 0.001);
       m.material.opacity = 0;
       this.headGroup.add(m);
@@ -401,7 +433,7 @@ export class Avatar {
     // Bangs (male) - static front hair drawn over the brows/forehead.
     let bangsMesh: THREE.Mesh | null = null;
     if (c.bangs) {
-      bangsMesh = makeSpritePlane(tex(c.bangs.url), 0);
+      bangsMesh = makeSpritePlane(tex(c.bangs.url), 0, c.bangs.bounds);
       placeHead(bangsMesh, c.bangs.anchor, c.bangs.z);
       this.headGroup.add(bangsMesh);
     }
@@ -411,11 +443,18 @@ export class Avatar {
     placeHead(eyebrowLeftMesh, c.eyebrows.left.anchor, c.eyebrows.left.z);
     const eyebrowRightMesh = makeSpritePlane(tex(c.eyebrows.right.url), 0);
     placeHead(eyebrowRightMesh, c.eyebrows.right.anchor, c.eyebrows.right.z);
-    this.headGroup.add(eyebrowLeftMesh, eyebrowRightMesh);
+    if (!c.bakedEyes) this.headGroup.add(eyebrowLeftMesh, eyebrowRightMesh);
 
-    // Mouth stack - cycle frames anchored at the mouth pixel position.
+    // The female mouth poses overlap the upper lip's skin. Fade their upper
+    // edge into the fixed backdrop so the philtrum stays stable across poses.
+    const feather = c.mouth.upperEdgeFeather;
+    if (feather) {
+      const height = (tex(c.mouth.silentClosed).image as HTMLImageElement).naturalHeight;
+      this.mouthFeather = makeMouthFeather(height, feather.start, feather.end);
+    }
     const mouthCycle = c.mouth.cycle.map((url, i) => {
-      const m = makeSpritePlane(tex(url), 0);
+      const m = makeSpritePlane(tex(url), 0, c.mouth.bounds);
+      if (this.mouthFeather) m.material.alphaMap = this.mouthFeather;
       placeHead(m, c.mouth.anchor, c.mouth.z + i * 0.001);
       m.material.opacity = 0;
       this.headGroup.add(m);
@@ -426,17 +465,19 @@ export class Avatar {
     // at a lower z so it always sits BEHIND the speaking cycle frames - keeps
     // the face's baked-in mouth area covered even when every cycle frame is
     // mid-fade (parity #38). Opacity locked at 1; the animator never touches it.
-    const mouthSilentBackdrop = makeSpritePlane(tex(c.mouth.backdrop), 0);
+    const mouthSilentBackdrop = makeSpritePlane(tex(c.mouth.backdrop), 0, c.mouth.bounds);
     placeHead(mouthSilentBackdrop, c.mouth.anchor, c.mouth.zBackdrop);
     mouthSilentBackdrop.material.opacity = 1;
     this.headGroup.add(mouthSilentBackdrop);
 
-    const mouthSilentClosed = makeSpritePlane(tex(c.mouth.silentClosed), 0);
+    const mouthSilentClosed = makeSpritePlane(tex(c.mouth.silentClosed), 0, c.mouth.bounds);
+    if (this.mouthFeather) mouthSilentClosed.material.alphaMap = this.mouthFeather;
     placeHead(mouthSilentClosed, c.mouth.anchor, c.mouth.zSilent);
     mouthSilentClosed.material.opacity = 1;
     this.headGroup.add(mouthSilentClosed);
 
-    const mouthSilentOpen = makeSpritePlane(tex(c.mouth.silentOpen), 0);
+    const mouthSilentOpen = makeSpritePlane(tex(c.mouth.silentOpen), 0, c.mouth.bounds);
+    if (this.mouthFeather) mouthSilentOpen.material.alphaMap = this.mouthFeather;
     placeHead(mouthSilentOpen, c.mouth.anchor, c.mouth.zSilent + 0.001);
     mouthSilentOpen.material.opacity = 0;
     this.headGroup.add(mouthSilentOpen);
@@ -497,6 +538,7 @@ export class Avatar {
         silentCloseRate: c.mouth.silentCloseRate,
         mode: c.mouth.mode,
         blendAdjacentFrames: c.mouth.blendAdjacentFrames,
+        singleAmplitudePose: c.mouth.singleAmplitudePose,
       },
     );
 
@@ -524,6 +566,7 @@ export class Avatar {
         },
         onBlinkEnd: () => this.eyeGaze.unlock(),
       },
+      c.blink.frameTime,
     );
 
     // Breathing scales the whole-avatar swayGroup (not just the body sprites)
@@ -592,18 +635,15 @@ export class Avatar {
   }
 
   private registerTickers(): void {
-    this.renderer.addTicker((dt) => this.mouthAnimator.update(dt));
+    this.renderer.addTicker((dt) => {
+      if (!this.speakingOverride) this.lipSync?.update(dt);
+      this.mouthAnimator.update(dt);
+    });
     this.renderer.addTicker((dt) => this.blinkAnimator.update(dt));
     this.renderer.addTicker((dt) => this.bodyAnimator.update(dt));
     this.renderer.addTicker((dt) => this.bodySway.update(dt));
     this.renderer.addTicker((dt) => this.eyeGaze.update(dt));
     this.renderer.addTicker((dt) => this.eyebrowAnimator.update(dt));
     this.renderer.addTicker((dt) => this.headSway.update(dt));
-    // LipSync ticker is here (not in attachAnalyser) so reconnects that call
-    // attachAnalyser again only swap the LipSyncDriver instance; the renderer
-    // never accumulates duplicate tickers that corrupt the hysteresis timer.
-    this.renderer.addTicker((dt) => {
-      if (!this.speakingOverride) this.lipSync?.update(dt);
-    });
   }
 }

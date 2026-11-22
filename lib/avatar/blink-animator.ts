@@ -62,7 +62,6 @@ const BLINK_PROBABILITY = 0.7;
 const DOUBLE_BLINK_PROBABILITY = 0.2;
 const SLOW_MODE_PROBABILITY = 0.2;
 const FRAME_TIME_FAST_S = 0.04;
-const FRAME_TIME_SLOW_S = 0.06;
 const CLOSED_HOLD_S = 0.2;
 
 type State =
@@ -72,6 +71,8 @@ type State =
 export class BlinkAnimator {
   private readonly meshes: BlinkMeshes;
   private readonly callbacks: BlinkCallbacks;
+  private readonly frameTime: number;
+  private readonly closedHoldTime: number;
   private speaking = false;
   private state: State;
 
@@ -84,9 +85,11 @@ export class BlinkAnimator {
    */
   private readonly playOrder: number[];
 
-  constructor(meshes: BlinkMeshes, callbacks: BlinkCallbacks = {}) {
+  constructor(meshes: BlinkMeshes, callbacks: BlinkCallbacks = {}, frameTime?: number) {
     this.meshes = meshes;
     this.callbacks = callbacks;
+    this.frameTime = frameTime ?? FRAME_TIME_FAST_S;
+    this.closedHoldTime = frameTime === undefined ? CLOSED_HOLD_S : frameTime * 2;
     this.state = { kind: "idle", elapsed: 0, interval: IDLE_INTERVAL_S };
     this.allLids = [
       meshes.open,
@@ -144,23 +147,24 @@ export class BlinkAnimator {
     }
 
     // Playing
-    this.state.frameElapsed += dt;
-    const frameTime = this.state.slow ? FRAME_TIME_SLOW_S : FRAME_TIME_FAST_S;
-    const thisFrameTime = this.isClosedPeak(this.state.frame) && this.state.slow
-      ? CLOSED_HOLD_S
-      : frameTime;
-    if (this.state.frameElapsed < thisFrameTime) return;
+    const playing = this.state;
+    const previousFrame = playing.frame;
+    const stepTime = playing.slow ? this.frameTime * 1.5 : this.frameTime;
+    playing.frameElapsed += dt;
+    while (!this.isFinished(playing.frame)) {
+      const hold = playing.slow && this.isClosedPeak(playing.frame) ? this.closedHoldTime : stepTime;
+      if (playing.frameElapsed < hold) break;
+      playing.frameElapsed -= hold;
+      playing.frame += 1;
+    }
 
-    this.state.frameElapsed = 0;
-    this.state.frame += 1;
-
-    if (this.isFinished(this.state.frame)) {
+    if (this.isFinished(playing.frame)) {
       // Blink finished: hide every lid frame and reveal the gaze eye stack -
       // that stack is the resting open eye, no `Eye_Open` frame needed.
       this.hideAllLids();
       this.setEyeBgVisible(true);
       this.callbacks.onBlinkEnd?.();
-      if (this.state.queueSecond) {
+      if (playing.queueSecond) {
         this.startBlink(false, false);
       } else {
         this.state = {
@@ -172,7 +176,7 @@ export class BlinkAnimator {
       return;
     }
 
-    this.showBlinkFrame(this.state.frame);
+    if (playing.frame !== previousFrame) this.showBlinkFrame(playing.frame);
   }
 
   /** Begin a blink: hide the eye stack (unless keepEyeBg) and play frame 0. */
@@ -227,12 +231,13 @@ export class BlinkAnimator {
 
   /** Hide all lid frames so the gaze eye stack underneath shows (rest state). */
   private hideAllLids(): void {
-    for (const m of this.allLids) m.material.opacity = 0;
+    this.showOnly(null);
   }
 
-  private showOnly(target: LidMesh): void {
-    for (const m of this.allLids) {
-      m.material.opacity = m === target ? 1 : 0;
+  private showOnly(target: LidMesh | null): void {
+    for (const mesh of this.allLids) {
+      mesh.visible = mesh === target;
+      mesh.material.opacity = mesh.visible ? 1 : 0;
     }
   }
 }

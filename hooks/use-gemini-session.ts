@@ -6,27 +6,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Avatar } from "@/lib/avatar/avatar";
 import { AudioStreamPlayer } from "@/lib/audio-stream-player";
 import { logChat } from "@/lib/chat-log";
+import type { Citation } from "@/lib/citations";
 import {
   detectLang,
-  detectSpeechLang,
   localeToSupportedLang,
   sttLangToSupported,
   voiceFor,
   type SupportedLang,
 } from "@/lib/lang-detect";
 import { formatMarkdownForDisplay, stripMarkdownForTts } from "@/lib/markdown";
-import {
-  askRagStream,
-  askSuggestions,
-  classifyKb,
-  pumpPcmResponse,
-  synthesiseSentenceStream,
-} from "@/lib/rag-ask";
-import { appendSpoken, batchSentences, splitIntoSentences } from "@/lib/sentence-split";
+import { pumpPcmResponse, synthesiseSentenceStream } from "@/lib/rag-ask";
+import { batchSentences, splitIntoSentences } from "@/lib/sentence-split";
+import { prepareBrowserTranslator, prepareLocalTranslation } from "@/lib/translate-local";
 import { cancelBrowserTts, speakWithBrowserTts } from "@/lib/audio/browser-tts";
+import { synthesizeDemoSpeech } from "@/lib/audio/demo-speech";
 import { joinTranscript } from "@/lib/audio/join-transcript";
 import {
   isStreamingLang,
+  resolveDefaultMicLang,
   STREAM_STT_CODE,
   type MicLang,
 } from "@/lib/audio/mic-input-langs";
@@ -38,52 +35,12 @@ import { useChatMessages, type ChatMessage } from "./use-chat-messages";
 import { readStoredGender } from "./use-gender";
 import { readTranslateMode } from "./use-translate-mode";
 
-// Error message shown (and spoken) when the RAG backend call fails.
-// Keyed by the same SupportedLang codes as VOICE_FOR_LANG.
 // Target character length per TTS request. Sentences are coalesced up to this
 // size so each request covers several sentences and the voice stays continuous
 // (one request per sentence resets prosody at every join - the per-bullet
 // "voice jump" on long answers). Tune up for more continuity, down for lower
 // per-batch latency.
 const TTS_BATCH_TARGET_CHARS = 240;
-
-const RAG_FAIL_MSG: Record<string, string> = {
-  ja: "申し訳ございません、ナレッジベースへの問い合わせに失敗しました。",
-  en: "Sorry, the knowledge base query failed.",
-  ko: "죄송합니다, 지식 베이스 조회에 실패했습니다.",
-  zh: "抱歉，知识库查询失败。",
-  zhTW: "抱歉，知識庫查詢失敗。",
-  ru: "Извините, запрос к базе знаний не удался.",
-  vi: "Xin lỗi, truy vấn cơ sở kiến thức thất bại.",
-  id: "Maaf, kueri basis pengetahuan gagal.",
-  my: "ကြောင်သောကြည်း၊ ကြောသာတ်မှတ် မေးမြန်မော သောမသိပါ။",
-  ne: "माफ गर्नुहोस्, ज्ञान आधार प्रश्न असफल भयो।",
-  th: "ขออภัย การค้นหาฐานความรู้ล้มเหลว",
-  fil: "Paumanhin, nabigo ang pagtatanong sa knowledge base.",
-  pt: "Desculpe, a consulta à base de conhecimento falhou.",
-};
-
-// Out-of-KB message shown (and spoken) when retrieval returns no relevant
-// chunks. Mirrors the FALLBACK table in /api/rag/ask/route.ts but is
-// resolved client-side using the STT/UI-detected userLang so the language
-// always matches the user's voice — the server uses detectLang(query) which
-// may return 'ja' when the user asked about a Japanese topic in their own
-// language (e.g. a Korean user typing a Japanese place name).
-const OUT_OF_KB_MSG: Record<string, string> = {
-  ja: "資料に該当する情報がありません。",
-  en: "No relevant information found in the materials.",
-  ko: "자료에 관련 정보가 없습니다.",
-  zh: "资料中没有相关信息。",
-  zhTW: "資料中找不到相關資訊。",
-  ru: "В материалах нет соответствующей информации.",
-  vi: "Không có thông tin liên quan trong tài liệu.",
-  id: "Tidak ada informasi terkait dalam materi.",
-  my: "ပစ္စည်းတွင် သက်ဆိုင်ရာ အချက်အလက် မရှိပါ။",
-  ne: "सामग्रीमा सम्बन्धित जानकारी छैन।",
-  th: "ไม่พบข้อมูลที่เกี่ยวข้องในเอกสาร",
-  fil: "Walang nahanap na kaugnay na impormasyon sa mga dokumento.",
-  pt: "Nenhuma informação relevante encontrada nos materiais.",
-};
 
 export type SessionStatus =
   | "idle"
@@ -137,28 +94,9 @@ export type UseGeminiSession = {
 };
 
 
-/**
- * Resolve the admin-configured mic default into a concrete {@link MicLang}.
- *
- * `"locale"` means "follow the UI language" - the behaviour that existed
- * before this became a setting, kept as the default so no deployment changes
- * behaviour on upgrade.
- *
- * The locale must be translated through `localeToSupportedLang`, NOT indexed
- * into a lang map directly: UI locales are BCP-47 (`zh-TW`) while MicLang uses
- * `SupportedLang` codes (`zhTW`). The old code did `locale in STREAM_STT_CODE`,
- * which quietly returned false for Traditional Chinese and dropped Taiwan to
- * "auto" - losing the live interim transcription that deployment specifically
- * asked for. `ja`/`en` hid the bug because they spell the same in both sets.
- */
-function resolveDefaultMicLang(setting: string, locale: string): MicLang {
-  if (setting !== "locale") return setting as MicLang;
-  const lang = localeToSupportedLang(locale);
-  return lang && isStreamingLang(lang) ? lang : "auto";
-}
-
 export function useGeminiSession(
   defaultMicLang: string = "locale",
+  cloudTranslationEnabled: boolean = true,
 ): UseGeminiSession {
   const tErr = useTranslations("errors");
   const locale = useLocale();
@@ -168,6 +106,11 @@ export function useGeminiSession(
   const playerRef = useRef<AudioStreamPlayer | null>(null);
   const avatarRef = useRef<Avatar | null>(null);
   const analyserAttachedRef = useRef(false);
+  const speechRef = useRef<{
+    controller: AbortController;
+    active: boolean;
+    openness: number | null;
+  } | null>(null);
   const recogniserRef = useRef<SttClient | null>(null);
   const streamerRef = useRef<SttStreamer | null>(null);
   const micWantedRef = useRef(false);
@@ -196,12 +139,7 @@ export function useGeminiSession(
   // up across taps + manual edits, cleared only on send), so pressing the mic
   // again keeps what's there instead of replacing it.
   const micBaseRef = useRef("");
-  const ragAbortRef = useRef<AbortController | null>(null);
-  // Separate lifetime for the post-answer suggestions request. It must survive
-  // a "skip audio" (which aborts ragAbortRef to stop TTS/streaming) - the answer
-  // is already rendered, so its follow-up chips are still valid. It is only
-  // cancelled when a NEW question starts or the session tears down.
-  const suggestAbortRef = useRef<AbortController | null>(null);
+  const turnAbortRef = useRef<AbortController | null>(null);
 
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [micActive, setMicActive] = useState(false);
@@ -249,8 +187,9 @@ export function useGeminiSession(
 
   const attachAnalyserIfPossible = useCallback(() => {
     if (analyserAttachedRef.current) return;
-    if (!avatarRef.current || !playerRef.current) return;
-    avatarRef.current.attachAnalyser(playerRef.current.getAnalyser());
+    const player = playerRef.current;
+    if (!avatarRef.current || !player) return;
+    avatarRef.current.attachAnalyser(player.getAnalyser(), () => player.hasPlayback());
     analyserAttachedRef.current = true;
   }, []);
 
@@ -264,6 +203,11 @@ export function useGeminiSession(
       avatarRef.current = avatar;
       analyserAttachedRef.current = false;
       attachAnalyserIfPossible();
+      const speech = speechRef.current;
+      if (speech?.active) {
+        avatar.setSpeakingOverride(true);
+        avatar.setSpeakingOpenness(speech.openness);
+      }
     },
     [attachAnalyserIfPossible],
   );
@@ -290,11 +234,18 @@ export function useGeminiSession(
     setStatus("ready");
   }, [attachAnalyserIfPossible, ctxRef, status]);
 
+  const stopSpeechPlayback = useCallback(() => {
+    const speech = speechRef.current;
+    speechRef.current = null;
+    if (speech) speech.controller.abort();
+    else cancelBrowserTts();
+    playerRef.current?.clear();
+    avatarRef.current?.stopSpeaking();
+  }, []);
+
   const teardownSession = useCallback(() => {
-    ragAbortRef.current?.abort();
-    ragAbortRef.current = null;
-    suggestAbortRef.current?.abort();
-    suggestAbortRef.current = null;
+    turnAbortRef.current?.abort();
+    turnAbortRef.current = null;
     micWantedRef.current = false;
     sttFinalBufferRef.current = [];
     sttLangRef.current = "";
@@ -302,11 +253,11 @@ export function useGeminiSession(
     recogniserRef.current = null;
     streamerRef.current?.stop();
     streamerRef.current = null;
-    playerRef.current?.clear();
+    stopSpeechPlayback();
     playerRef.current = null;
     analyserAttachedRef.current = false;
     setMicActive(false);
-  }, []);
+  }, [stopSpeechPlayback]);
 
   const disconnect = useCallback(() => {
     teardownSession();
@@ -330,6 +281,62 @@ export function useGeminiSession(
     avatarRef.current?.onTalkEnd();
   }, []);
 
+  const speakClientReply = useCallback(
+    async (text: string, lang: SupportedLang, gender: "female" | "male", signal: AbortSignal) => {
+      if (signal.aborted || !ttsEnabledRef.current) return;
+      const speech = { controller: new AbortController(), active: false, openness: null as number | null };
+      speechRef.current = speech;
+      const cancelSpeech = () => speech.controller.abort();
+      signal.addEventListener("abort", cancelSpeech, { once: true });
+      try {
+        let failure = "playback";
+        const played = await speakWithBrowserTts(text, {
+          lang,
+          gender,
+          muted: audioMutedRef.current,
+          signal: speech.controller.signal,
+          onFailure: (reason) => { failure = reason; },
+          onSpeakingChange: (speaking) => {
+            if (speechRef.current !== speech) return;
+            speech.active = speaking;
+            avatarRef.current?.setSpeakingOverride(speaking);
+          },
+          onOpenness: (openness) => {
+            if (speechRef.current !== speech) return;
+            speech.openness = openness;
+            avatarRef.current?.setSpeakingOpenness(openness);
+          },
+        });
+        if (played || speech.controller.signal.aborted || !ttsEnabledRef.current) return;
+
+        // Preserve the selected browser voice whenever it can play. Synthesize
+        // PCM locally only when that path is unavailable.
+        try {
+          const pcm = await synthesizeDemoSpeech(text, lang, gender, speech.controller.signal);
+          if (speech.controller.signal.aborted || !ttsEnabledRef.current) return;
+          const player = playerRef.current;
+          if (pcm?.length && player) {
+            player.pushPcm(pcm, { in: true, out: true });
+            await player.waitForIdle(speech.controller.signal);
+            return;
+          }
+        } catch (err) {
+          if (speech.controller.signal.aborted) return;
+          console.warn("[useGeminiSession] Offline speech failed:", err);
+        }
+        const language = new Intl.DisplayNames([locale], { type: "language" }).of(lang === "zhTW" ? "zh-TW" : lang) ?? lang;
+        setErrorMessage(tErr(failure === "voice-missing" ? "speechVoiceMissing" : "speechUnavailable", { language }));
+      } finally {
+        signal.removeEventListener("abort", cancelSpeech);
+        if (speechRef.current === speech) {
+          speechRef.current = null;
+          avatarRef.current?.setSpeakingOverride(false);
+        }
+      }
+    },
+    [locale, tErr],
+  );
+
   const playSpeechChunk = useCallback(
     async (
       response: Promise<Response>,
@@ -350,29 +357,15 @@ export function useGeminiSession(
           receivedAudio = true;
           player.pushPcm(pcm, fade);
         });
-        if (!receivedAudio && !signal.aborted && ttsEnabledRef.current) {
-          throw new Error("TTS returned no audio");
-        }
-        return;
+        if (!receivedAudio && !signal.aborted && ttsEnabledRef.current) throw new Error("TTS returned no audio");
       } catch (err) {
         if (signal.aborted || !ttsEnabledRef.current) return;
-        console.warn("[useGeminiSession] TTS failed, using browser voice:", err);
-      }
-      await playerRef.current?.waitForIdle(signal);
-      if (signal.aborted || !ttsEnabledRef.current) return;
-      const played = await speakWithBrowserTts(text, {
-        lang,
-        gender,
-        muted: audioMutedRef.current,
-        signal,
-        onSpeakingChange: (speaking) => avatarRef.current?.setSpeakingOverride(speaking),
-        onOpenness: (openness) => avatarRef.current?.setSpeakingOpenness(openness),
-      });
-      if (!played && !signal.aborted && ttsEnabledRef.current) {
-        setErrorMessage(tErr("speechUnavailable"));
+        console.warn("[useGeminiSession] TTS failed, using client voice:", err);
+        await playerRef.current?.waitForIdle(signal);
+        await speakClientReply(text, lang, gender, signal);
       }
     },
-    [tErr],
+    [speakClientReply],
   );
 
   const speakSentences = useCallback(
@@ -398,72 +391,61 @@ export function useGeminiSession(
     async (text: string, langHint?: SupportedLang | null) => {
       const trimmed = text.trim();
       if (!trimmed) return;
+      const translateMode = readTranslateMode();
+      const sourceLang = translateMode.enabled ? langHint ?? detectLang(trimmed) : null;
+      const targetLang = sourceLang === translateMode.langA ? translateMode.langB : translateMode.langA;
+      const translateLocally = sourceLang && !cloudTranslationEnabled
+        ? prepareLocalTranslation(trimmed, sourceLang, targetLang)
+        : null;
+
       await ensureAudio();
       if (!playerRef.current) await connect();
 
-      ragAbortRef.current?.abort();
+      turnAbortRef.current?.abort();
       const abort = new AbortController();
-      ragAbortRef.current = abort;
-      // New question invalidates the previous turn's pending suggestions.
-      suggestAbortRef.current?.abort();
-      const suggestAbort = new AbortController();
-      suggestAbortRef.current = suggestAbort;
-      playerRef.current?.clear();
+      turnAbortRef.current = abort;
+      stopSpeechPlayback();
 
-      const priorHistory = chat.getRecentHistory(6);
       chat.pushFullUser(trimmed);
       setThinking(true);
       setErrorMessage(null);
 
-      // Detect the user's language for TTS voice selection on both the CHAT and
-      // RAG paths. Prefer the Chirp spoken-language hint (mic path) when present:
-      // it tells Latin-script languages apart and never defaults an unknown
-      // script to Japanese. For typed input (no hint) fall back to script
-      // detection - detecting from the ANSWER text can misfire (an answer with
-      // katakana product names scores as Japanese even if the user asked in
-      // Indonesian/English).
-      const userLang = langHint ?? detectLang(trimmed);
-
-      // Interpreter mode (top-bar Translate toggle): bypass classify-kb/RAG/
-      // chitchat entirely - this turn is a translation, not a question. Pair
-      // is two freely-chosen languages (client spec 2026-08-18: originally
-      // locked to ja<->foreign, client asked for either side selectable, e.g.
-      // English<->Korean); direction is picked per-turn by which side the
-      // input matches, falling back to langA when neither matches (e.g. a
-      // third language slipped through detection).
-      const translateMode = readTranslateMode();
+      // Interpreter mode translates directly, bypassing classification and RAG.
       if (translateMode.enabled) {
-        const targetLang: SupportedLang =
-          userLang === translateMode.langA
-            ? translateMode.langB
-            : translateMode.langA;
         avatarRef.current?.onTalkStart(false);
         const askedAt = new Date().toISOString();
         let translated: string;
+        let translationStatus: number | undefined;
         try {
-          const res = await fetch("/api/translate", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ text: trimmed, targetLang }),
-            signal: abort.signal,
-          });
-          if (!res.ok) throw new Error(`translate ${res.status}`);
-          const json = (await res.json()) as { text?: string };
-          translated = (json.text ?? "").trim();
+          if (translateLocally) {
+            translated = (await translateLocally(abort.signal)) ?? "";
+          } else {
+            const res = await fetch("/api/translate", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ text: trimmed, targetLang }),
+              signal: abort.signal,
+            });
+            translationStatus = res.status;
+            if (!res.ok) throw new Error(`translate ${res.status}`);
+            const json = (await res.json()) as { text?: string };
+            translated = (json.text ?? "").trim();
+          }
+          if (!translated) throw new Error("Empty translation");
         } catch (err) {
           if (abort.signal.aborted) return;
           const msg = err instanceof Error ? err.message : String(err);
           console.warn("[useGeminiSession] translate failed:", msg);
-          setThinking(false);
-          avatarRef.current?.onTalkEnd();
-          return;
-        }
-        if (!translated) {
+          const errorKey = translateLocally ? "translationDemoUnavailable"
+            : translationStatus === 503 ? "translationUnavailable" : "translationFailed";
+          setErrorMessage(tErr(errorKey));
           setThinking(false);
           avatarRef.current?.onTalkEnd();
           return;
         }
 
+        if (abort.signal.aborted) return;
+        setThinking(false);
         chat.pushFullModel(translated);
         logChat({
           question: trimmed,
@@ -485,326 +467,53 @@ export function useGeminiSession(
         return;
       }
 
-      const decision = await classifyKb(trimmed, abort.signal, priorHistory).catch(
-        () => (abort.signal.aborted ? null : ("KB" as const)),
-      );
-      if (abort.signal.aborted || decision === null) {
-        setThinking(false);
-        return;
-      }
-
+      const askedAt = new Date().toISOString();
+      const gender = readStoredGender();
+      const replyLang = localeToSupportedLang(locale) ?? "en";
       avatarRef.current?.onTalkStart(false);
 
-      if (decision === "CHAT") {
-        const askedAt = new Date().toISOString();
-        let replyText: string;
-        try {
-          const res = await fetch("/api/chitchat", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              query: trimmed,
-              history: priorHistory,
-              langHint,
-              gender: readStoredGender(),
-            }),
-            signal: abort.signal,
-          });
-          if (!res.ok) throw new Error(`chitchat ${res.status}`);
-          const json = (await res.json()) as { text?: string };
-          replyText = (json.text ?? "").trim();
-        } catch (err) {
-          if (abort.signal.aborted) {
-            // Skipped/interrupted: still persist the question to chat history.
-            logChat({
-              question: trimmed,
-              answer: "",
-              questionAt: askedAt,
-              answerAt: new Date().toISOString(),
-              source: "web",
-            });
-            return;
-          }
-          const msg = err instanceof Error ? err.message : String(err);
-          console.warn("[useGeminiSession] chitchat failed:", msg);
-          setThinking(false);
-          avatarRef.current?.onTalkEnd();
-          return;
-        }
-        if (!replyText) {
-          setThinking(false);
-          avatarRef.current?.onTalkEnd();
-          return;
-        }
-
-        chat.pushFullModel(replyText);
-        logChat({
-          question: trimmed,
-          answer: replyText,
-          questionAt: askedAt,
-          answerAt: new Date().toISOString(),
-          source: "web",
-        });
-
-        try {
-          await speakSentences(replyText, abort.signal, detectSpeechLang(replyText, langHint));
-        } catch (err) {
-          if (!abort.signal.aborted) {
-            const msg = err instanceof Error ? err.message : String(err);
-            console.warn("[useGeminiSession] chitchat TTS failed:", msg);
-          }
-        }
-        if (!abort.signal.aborted) avatarRef.current?.onTalkEnd();
-        return;
-      }
-
-      const askedAt = new Date().toISOString();
-
-      // Streaming RAG: fill the bubble token-by-token and start speaking each
-      // sentence as soon as it completes, instead of waiting for the whole
-      // answer. The server already streams SSE deltas (askRagStream); this
-      // wires them into the chat bubble (appendModelChunk) and an ordered TTS
-      // playback chain, so perceived latency drops from "full answer" (~10s on
-      // long replies) to "first sentence" (~1-2s).
-      // Keep the reply voice consistent across cloud and browser playback.
-      const ttsGender = readStoredGender();
-      let speechLang: SupportedLang | null = null;
-      const streamedSpeech = new AbortController();
-      abort.signal.addEventListener("abort", () => streamedSpeech.abort(), { once: true });
-      let rawAnswer = "";
-      let gotDelta = false;
-      let outOfKbEarly = false;
-      let spokenCount = 0;
-      // Synthesis fires in parallel as sentences complete; playback is
-      // serialised through this chain so audio stays in the right order.
-      let playChain: Promise<void> = Promise.resolve();
-      const enqueuePlay = (chunk: string, lang: SupportedLang) => {
-        const voice = voiceFor(lang, ttsGender);
-        const response = synthesiseSentenceStream(chunk, streamedSpeech.signal, { ...voice, gender: ttsGender });
-        void response.catch(() => {});
-        playChain = playChain.then(() =>
-          playSpeechChunk(response, chunk, lang, ttsGender, streamedSpeech.signal),
-        );
-      };
-      // Speak every fully-formed sentence. While streaming, hold back the last
-      // (possibly partial) sentence until more text arrives or the stream ends
-      // (`final`). Skipped for out-of-KB answers, whose text is re-localised at
-      // the end and spoken in one shot to avoid speaking the wrong language.
-      const flushTts = (final: boolean) => {
-        if (streamedSpeech.signal.aborted || !ttsEnabledRef.current) return;
-        if (outOfKbEarly) return;
-        const tts = stripMarkdownForTts(rawAnswer);
-        const sentences = splitIntoSentences(tts);
-        // Only sentences known to be complete are eligible; while streaming the
-        // trailing one may still be growing until `final`.
-        const available = final ? sentences.length : sentences.length - 1;
-        if (spokenCount >= available) return;
-        speechLang ??= detectSpeechLang(tts, langHint);
-        // Coalesce sentences into ~TTS_BATCH_TARGET_CHARS batches so each TTS
-        // request spans several sentences and prosody stays continuous - one
-        // request per sentence resets the voice baseline at every join, heard
-        // as a "jump" at the start of each bullet on long answers. Exception:
-        // the very first batch is a single sentence so audio still starts
-        // ~1-2 s in. Mid-stream a sub-target tail waits for more text; on
-        // `final` whatever remains is flushed regardless of size.
-        while (spokenCount < available) {
-          let end = spokenCount;
-          if (spokenCount === 0) {
-            end = spokenCount + 1; // fast first utterance
-          } else {
-            let len = 0;
-            while (end < available && len < TTS_BATCH_TARGET_CHARS) {
-              len += sentences[end].length;
-              end++;
-            }
-            if (!final && len < TTS_BATCH_TARGET_CHARS) break; // wait for a full batch
-          }
-          // appendSpoken (not join(" ")) so punctuation-less bullet lines get a
-          // pause instead of running together within this one TTS request.
-          const chunk = sentences.slice(spokenCount, end).reduce(appendSpoken, "").trim();
-          spokenCount = end;
-          if (chunk) enqueuePlay(chunk, speechLang);
-        }
-      };
-
-      let result: Awaited<ReturnType<typeof askRagStream>>;
+      let reply: { answer: string; citations: Citation[]; suggestions?: string[] };
       try {
-        result = await askRagStream(
-          trimmed,
-          {
-            onMeta: (m) => {
-              outOfKbEarly = m.outOfKb;
-              speechLang = m.answerLang ?? null;
-            },
-            onDelta: (delta) => {
-              gotDelta = true;
-              rawAnswer += delta;
-              chat.appendModelChunk(delta);
-              flushTts(false);
-            },
-          },
-          abort.signal,
-          priorHistory,
-          langHint,
-        );
-      } catch (err) {
-        if (abort.signal.aborted) {
-          // Skipped/interrupted mid-stream: persist the question + whatever
-          // partial answer streamed so the turn is not lost from chat history.
-          logChat({
-            question: trimmed,
-            answer: rawAnswer,
-            questionAt: askedAt,
-            answerAt: new Date().toISOString(),
-            source: "web",
-          });
-          return;
-        }
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error("[useGeminiSession] RAG ask failed:", msg);
-        // Show and speak the error in the user's own language. If a partial
-        // answer already streamed in, replace it so we never leave a truncated
-        // reply on screen as if it were complete.
-        const errorMsg = RAG_FAIL_MSG[userLang] ?? RAG_FAIL_MSG.ja;
-        const partialId = gotDelta ? chat.currentModelMessageId() : null;
-        if (partialId) {
-          chat.replaceModelText(partialId, errorMsg);
-          chat.endTurn();
-        } else {
-          chat.pushFullModel(errorMsg);
-        }
-        logChat({
-          question: trimmed,
-          answer: errorMsg,
-          questionAt: askedAt,
-          answerAt: new Date().toISOString(),
-          source: "web",
+        const response = await fetch("/api/demo-chat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ query: trimmed, locale, gender }),
+          signal: abort.signal,
         });
-        try {
-          streamedSpeech.abort();
-          playerRef.current?.clear();
-          await speakSentences(errorMsg, abort.signal, userLang);
-        } catch {
-          // TTS failure for the error message itself is non-fatal.
-        }
-        if (!abort.signal.aborted) avatarRef.current?.onTalkEnd();
-        return;
-      }
-      if (abort.signal.aborted) {
-        // Skipped/interrupted after the stream returned but before finalising:
-        // persist the question + partial answer so it stays in chat history.
-        logChat({
-          question: trimmed,
-          answer: rawAnswer,
-          questionAt: askedAt,
-          answerAt: new Date().toISOString(),
-          source: "web",
-        });
+        if (!response.ok) throw new Error(`Chat failed: ${response.status}`);
+        reply = await response.json();
+        if (!reply.answer?.trim()) throw new Error("Empty reply");
+      } catch {
+        if (abort.signal.aborted) return;
+        setThinking(false);
+        setErrorMessage(tErr("chatFailed"));
+        avatarRef.current?.onTalkEnd();
         return;
       }
 
-      // When the KB has no matching content, override the server's answer
-      // with the localised message for userLang. The server picks the
-      // language from detectLang(query), which may return 'ja' when the
-      // user asked about a Japanese topic in their native language — causing
-      // a Korean/Vietnamese/etc voice to speak Japanese text.
-      //
-      // Safety-net: Flash may still output a Japanese "no-info" phrase even when
-      // 【資料なし応答文】 is injected with the correct language. Detect and
-      // replace client-side. Covers BOTH phrasings the RAG prompt instructs:
-      // "資料に該当する情報がありません" (confident path, OUT_OF_KB_MSGS verbatim)
-      // and "該当する情報が見つかりませんでした" (low-confidence path, buildGroundedPrompt
-      // 【資料なし応答文】). Missing the second variant left citation chips under a
-      // no-info answer and showed the JP phrase for a non-JP question.
-      const NO_INFO_JA_RE =
-        /^(?:資料[にには]*)?(?:該当|関連)する情報が(?:ありません|見つかりません(?:でした)?)[。]?$/;
-      // Safety-net: if the model echoed an injected internal directive label
-      // instead of just the answer text - either the whole 【資料なし応答文...】
-      // line, or a 【ケースA/ケースB...】 case-branching heading copied verbatim
-      // from RAG_SYSTEM_PROMPT's no-info branching rule (seen in eval, KB-
-      // independent) - strip the leading 【...】 label so the real content
-      // shows and the no-info detection below (anchored with ^) still
-      // matches. Anchored to line start only, so it never touches a bracketed
-      // term that's part of the actual answer body. The prompt was reworked
-      // to prevent both leaks, but a leak must never surface to the user.
-      const cleaned = result.answer.replace(/^\s*【(?:資料なし応答文|ケース[^】]*)[^】]*】\s*/, "");
-      const answerRaw =
-        result.outOfKb ||
-        (userLang !== "ja" && NO_INFO_JA_RE.test(cleaned.trim()))
-          ? (OUT_OF_KB_MSG[userLang] ?? OUT_OF_KB_MSG.ja)
-          : cleaned;
-
-      // Suppress citation chips when the final answer is a "no info" message.
-      // Retrieval can return chunks above min_score (so the server attaches
-      // citations) while Flash still judges them irrelevant and outputs the
-      // no-info phrase — leaving reference chips under a "no information"
-      // answer. That contradiction is exactly what the client flagged (#29:
-      // "資料は表示されているのに該当情報なし"). If there is no usable answer,
-      // there is nothing to cite.
-      const answerIsNoInfo =
-        result.outOfKb ||
-        NO_INFO_JA_RE.test(cleaned.trim()) ||
-        answerRaw.trim() === (OUT_OF_KB_MSG[userLang] ?? OUT_OF_KB_MSG.ja);
-      const citations = answerIsNoInfo ? [] : result.citations;
-
-      const displayText = formatMarkdownForDisplay(answerRaw);
-      const ttsText = stripMarkdownForTts(answerRaw);
-
-      // Finalise the streamed bubble: swap the raw markdown for the formatted
-      // display text and attach citations. If nothing streamed (empty answer,
-      // or an out-of-KB reply that produced no usable bubble), push a fresh
-      // bubble instead.
-      let answerMsgId = gotDelta ? chat.currentModelMessageId() : null;
-      if (answerMsgId) {
-        chat.replaceModelText(answerMsgId, displayText);
-        chat.setCurrentModelCitations(citations);
-      } else {
-        answerMsgId = chat.pushFullModel(displayText, citations);
-      }
-      chat.endTurn();
-
+      if (abort.signal.aborted) return;
+      const id = chat.pushFullModel(formatMarkdownForDisplay(reply.answer), reply.citations);
+      if (reply.suggestions?.length) chat.setSuggestionsForMessage(id, reply.suggestions);
+      setThinking(false);
       logChat({
         question: trimmed,
-        answer: answerRaw,
+        answer: reply.answer,
         questionAt: askedAt,
         answerAt: new Date().toISOString(),
         source: "web",
       });
 
-      // Uses suggestAbort (not the turn's `abort`) so pressing "skip audio"
-      // mid-answer does not throw away the already-rendered answer's follow-up
-      // chips - only a new question or teardown cancels them.
-      void askSuggestions(trimmed, ttsText, suggestAbort.signal, chat.getRecentHistory(6), userLang)
-        .then((s) => {
-          if (suggestAbort.signal.aborted || s.length === 0) return;
-          if (answerMsgId) chat.setSuggestionsForMessage(answerMsgId, s);
-        })
-        .catch(() => undefined);
-
       try {
-        if (outOfKbEarly || ttsText !== stripMarkdownForTts(rawAnswer)) {
-          // Out-of-KB or re-localised: nothing (or the wrong language) was
-          // streamed to TTS, so drop any queued audio and speak the corrected
-          // text in one shot.
-          streamedSpeech.abort();
-          playerRef.current?.clear();
-          const lang = answerIsNoInfo ? userLang : (speechLang ?? detectSpeechLang(ttsText, langHint));
-          await speakSentences(ttsText, abort.signal, lang);
-        } else {
-          flushTts(true);
-          await playChain;
-          await playerRef.current?.waitForIdle(abort.signal);
-        }
+        await speakClientReply(stripMarkdownForTts(reply.answer), replyLang, gender, abort.signal);
       } catch (err) {
-        if (!abort.signal.aborted) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.warn("[useGeminiSession] TTS failed:", msg);
-        }
+        if (!abort.signal.aborted) console.warn("[useGeminiSession] Client speech failed:", err);
+      } finally {
+        if (!abort.signal.aborted) avatarRef.current?.onTalkEnd();
       }
-      if (!abort.signal.aborted) avatarRef.current?.onTalkEnd();
     },
-    [chat, connect, ensureAudio, playSpeechChunk, speakSentences],
+    [chat, cloudTranslationEnabled, connect, ensureAudio, locale, speakClientReply, speakSentences, stopSpeechPlayback, tErr],
   );
+
 
   const sendText = useCallback(
     async (text: string) => {
@@ -826,14 +535,12 @@ export function useGeminiSession(
   // Declared before `startTalk` (which calls it for barge-in) so the latter's
   // dependency array doesn't reference a binding before its declaration.
   const skip = useCallback(() => {
-    ragAbortRef.current?.abort();
-    ragAbortRef.current = null;
-    cancelBrowserTts();
-    playerRef.current?.clear();
-    avatarRef.current?.setSpeakingOverride(false);
+    turnAbortRef.current?.abort();
+    turnAbortRef.current = null;
+    stopSpeechPlayback();
     avatarRef.current?.onTalkEnd();
     setThinking(false);
-  }, []);
+  }, [stopSpeechPlayback]);
 
   const startTalk = useCallback(async () => {
     // Reject overlapping starts: the ref guard alone is not enough because the
@@ -857,6 +564,14 @@ export function useGeminiSession(
     // awaits so it reflects exactly what was on screen when the mic was pressed.
     micBaseRef.current = draftRef.current;
 
+    const pickedLang = micLangRef.current;
+    const translateMode = readTranslateMode();
+    if (!cloudTranslationEnabled && translateMode.enabled && isStreamingLang(pickedLang)) {
+      // The mic press supplies user activation before transcription finishes.
+      const target = pickedLang === translateMode.langA ? translateMode.langB : translateMode.langA;
+      void prepareBrowserTranslator(pickedLang, target);
+    }
+
     try {
     await ensureAudio();
     if (!playerRef.current) await connect();
@@ -871,7 +586,6 @@ export function useGeminiSession(
     // Route by the picked mic language: streaming-capable languages use the
     // `long` model for live interim; "auto" and the rest fall through to the
     // sync Chirp path below (any language, no interim).
-    const pickedLang = micLangRef.current;
     if (isStreamingLang(pickedLang)) {
       const streamer = new SttStreamer({
         onPartial: (text) => {
@@ -1025,6 +739,7 @@ export function useGeminiSession(
       micStartingRef.current = false;
     }
   }, [
+    cloudTranslationEnabled,
     connect,
     ensureAudio,
     sendText,
@@ -1045,12 +760,10 @@ export function useGeminiSession(
   // Admin voice gate (idempotent). When disabled, TTS is skipped at the source
   // (no synthesis cost) and any in-flight audio is dropped so it stops now.
   const setTtsEnabled = useCallback((enabled: boolean) => {
+    if (ttsEnabledRef.current === enabled) return;
     ttsEnabledRef.current = enabled;
-    if (!enabled) {
-      playerRef.current?.clear();
-      cancelBrowserTts();
-    }
-  }, []);
+    if (!enabled) stopSpeechPlayback();
+  }, [stopSpeechPlayback]);
 
   const pushGreeting = useCallback((text: string): string => {
     return chat.pushFullModel(text);

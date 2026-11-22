@@ -109,6 +109,7 @@ const FILIPINO_HINTS =
 const PORTUGUESE_HINTS =
   /\b(você|vocês|não|sim|obrigad[oa]|quantos|quantas|quando|onde|porque|qual|dias|férias|trabalho|salário|posso|preciso|gostaria|também|muito|então|porém|está|estão|são|fazer|tenho|minha|isso|empresa|funcionário|regras|procedimento|saudação|olá)\b/i;
 const LATIN_LETTER = /[A-Za-z]/;
+const ENGLISH_GREETING = /^(?:(?:hi|hello|hey)(?: there)?|good (?:morning|afternoon|evening|night)|how are you|thank you|thanks|bye|goodbye)[\s\p{P}]*$/iu;
 
 export function detectLang(text: string): SupportedLang {
   if (!text) return "ja";
@@ -151,14 +152,12 @@ export type LangDetection = { lang: SupportedLang; confident: boolean };
  * Like detectLang, but also reports whether the detection is reliable enough
  * to FORCE the answer language. Unambiguous scripts (Hangul, kana, Cyrillic,
  * Myanmar, Devanagari, Vietnamese tone marks) and strong Indonesian stop-word
- * hits are confident. Latin text without id/vi markers (could be id/ms/en) and
- * CJK-only text without kana (ambiguous between ja / zh / zhTW for short
- * strings) are NOT confident - the caller should let the LLM mirror the
- * question language instead of pinning a possibly-wrong code. `lang` still
- * carries the best guess (used for the no-info fallback + retrieval translation
- * decision), but `confident=false` means "do not hard-force this".
+ * hits are confident. Common English greetings are also recognized directly.
+ * For ambiguous Latin text, an English preference confirms the English guess.
+ * Other ambiguous text, such as CJK without kana, returns a best guess with
+ * `confident=false` so the caller can mirror the current question.
  */
-export function detectLangConfident(text: string): LangDetection {
+export function detectLangConfident(text: string, preferred?: SupportedLang | null): LangDetection {
   if (!text) return { lang: "ja", confident: false };
   if (HANGUL.test(text)) return { lang: "ko", confident: true };
   if (CYRILLIC.test(text)) return { lang: "ru", confident: true };
@@ -190,8 +189,11 @@ export function detectLangConfident(text: string): LangDetection {
   if (PORTUGUESE_HINTS.test(text)) return { lang: "pt", confident: true };
   if (FILIPINO_HINTS.test(text)) return { lang: "fil", confident: true };
   if (INDONESIAN_HINTS.test(text)) return { lang: "id", confident: true };
-  // Latin letters without id/vi markers could be id/ms/other - don't force.
-  if (latinCount > 0) return { lang: "en", confident: false };
+  // Common English greetings are identifiable even with just one word. For
+  // other ambiguous Latin text, the English UI preference can confirm English.
+  if (latinCount > 0) {
+    return { lang: "en", confident: preferred === "en" || ENGLISH_GREETING.test(text.trim()) };
+  }
   // No recognizable script at all (Thai, Arabic, Hebrew, etc. - languages we
   // have no voice for). FORCE the Japanese fallback rather than mirroring: a
   // mirrored answer would be in a language the TTS can't voice, and feeding it
@@ -206,6 +208,14 @@ export function detectLangConfident(text: string): LangDetection {
 export function detectSpeechLang(reply: string, hint?: SupportedLang | null): SupportedLang {
   const { lang, confident } = detectLangConfident(reply);
   return confident ? lang : (hint ?? lang);
+}
+
+export function hasReplyLanguageConflict(reply: string, expected: SupportedLang): boolean {
+  // A short Japanese clause can be hidden by a longer English reply's script
+  // majority. Small-talk responses in English should use English throughout.
+  if (expected === "en" && /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(reply)) return true;
+  const detected = detectLangConfident(reply);
+  return detected.confident && detected.lang !== expected;
 }
 
 /**
@@ -344,7 +354,8 @@ export function localeToSupportedLang(locale: string): SupportedLang | null {
   const MAP: Record<string, SupportedLang> = {
     ja: "ja",
     en: "en",
+    vi: "vi",
     "zh-TW": "zhTW",
   };
-  return MAP[locale] ?? null;
+  return Object.hasOwn(MAP, locale) ? MAP[locale] : null;
 }

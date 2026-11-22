@@ -162,14 +162,29 @@ export async function loadTextures(
  * the origin. The returned mesh uses a PlaneGeometry + MeshBasicMaterial so
  * we can animate alpha cleanly (more control than THREE.Sprite).
  */
+export type SpriteBounds = readonly [left: number, top: number, right: number, bottom: number];
+
 export function makeSpritePlane(
   texture: THREE.Texture,
   z: number,
+  bounds?: SpriteBounds,
 ): THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> {
   const img = texture.image as HTMLImageElement | undefined;
   const w = img?.naturalWidth ?? 512;
   const h = img?.naturalHeight ?? 512;
-  const geometry = new THREE.PlaneGeometry(w, h);
+  const [left, top, right, bottom] = bounds ?? [0, 0, w, h];
+  const regionWidth = right - left;
+  const regionHeight = bottom - top;
+  const geometry = new THREE.PlaneGeometry(regionWidth, regionHeight);
+  if (bounds) {
+    // Crop fully transparent margins while retaining placement on the authored
+    // canvas. Artwork, calibration anchors and layer order stay aligned.
+    geometry.translate((left + right - w) / 2, (h - top - bottom) / 2, 0);
+    const uv = geometry.attributes.uv;
+    for (let i = 0; i < uv.count; i++) {
+      uv.setXY(i, (left + uv.getX(i) * regionWidth) / w, (h - bottom + uv.getY(i) * regionHeight) / h);
+    }
+  }
   const material = new THREE.MeshBasicMaterial({
     map: texture,
     transparent: true,
@@ -179,4 +194,19 @@ export function makeSpritePlane(
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.z = z;
   return mesh;
+}
+
+/** Restrict animated mouth layers to the lips, feathering out their upper edge. */
+export function makeMouthFeather(height: number, start: number, end: number): THREE.DataTexture {
+  const pixels = new Uint8Array(height * 4);
+  for (let row = 0; row < height; row++) {
+    // Sprite coordinates count down from the top, while the texture's UV counts up.
+    const opacity = THREE.MathUtils.smoothstep(height - row - 0.5, start, end);
+    pixels.fill(Math.round(opacity * 255), row * 4, row * 4 + 4);
+  }
+  const texture = new THREE.DataTexture(pixels, 1, height);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
 }

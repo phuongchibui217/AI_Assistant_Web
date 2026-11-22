@@ -1,4 +1,4 @@
-import type { SupportedLang } from "@/lib/lang-detect";
+import { sttLangToSupported, type SupportedLang } from "@/lib/lang-detect";
 
 /**
  * Mic input language selection.
@@ -32,30 +32,39 @@ export function isStreamingLang(lang: MicLang): lang is SupportedLang {
   return lang !== "auto" && lang in STREAM_STT_CODE;
 }
 
-/** Picker options. Names are shown in their own language (picker convention);
- *  `stream` drives the "live text" hint + grouping in the UI. */
-export const MIC_LANG_OPTIONS: Array<{
-  code: MicLang;
-  name: string;
-  flag: string;
-  stream: boolean;
-}> = [
-  { code: "auto", name: "Auto", flag: "🌐", stream: false },
-  { code: "ja", name: "日本語", flag: "🇯🇵", stream: true },
-  { code: "en", name: "English", flag: "🇺🇸", stream: true },
-  { code: "ko", name: "한국어", flag: "🇰🇷", stream: true },
-  { code: "zh", name: "简体中文", flag: "🇨🇳", stream: true },
-  { code: "zhTW", name: "繁體中文", flag: "🇹🇼", stream: true },
-  { code: "ru", name: "Русский", flag: "🇷🇺", stream: true },
-  { code: "vi", name: "Tiếng Việt", flag: "🇻🇳", stream: true },
-  { code: "id", name: "Bahasa Indonesia", flag: "🇮🇩", stream: true },
-  { code: "pt", name: "Português", flag: "🇧🇷", stream: true },
-  { code: "th", name: "ไทย", flag: "🇹🇭", stream: false },
-  { code: "fil", name: "Filipino", flag: "🇵🇭", stream: false },
-  { code: "my", name: "မြန်မာ", flag: "🇲🇲", stream: false },
-  { code: "ne", name: "नेपाली", flag: "🇳🇵", stream: false },
-];
+const LANGUAGE_LABELS: Record<SupportedLang, { name: string; flag: string }> = {
+  ja: { name: "日本語", flag: "🇯🇵" },
+  en: { name: "English", flag: "🇺🇸" },
+  ko: { name: "한국어", flag: "🇰🇷" },
+  zh: { name: "简体中文", flag: "🇨🇳" },
+  zhTW: { name: "繁體中文", flag: "🇹🇼" },
+  ru: { name: "Русский", flag: "🇷🇺" },
+  vi: { name: "Tiếng Việt", flag: "🇻🇳" },
+  id: { name: "Bahasa Indonesia", flag: "🇮🇩" },
+  pt: { name: "Português", flag: "🇧🇷" },
+  th: { name: "ไทย", flag: "🇹🇭" },
+  fil: { name: "Filipino", flag: "🇵🇭" },
+  my: { name: "မြန်မာ", flag: "🇲🇲" },
+  ne: { name: "नेपाली", flag: "🇳🇵" },
+};
+
+export const TRANSLATE_LANG_OPTIONS = (Object.keys(LANGUAGE_LABELS) as SupportedLang[]).map(
+  (code) => ({ code, ...LANGUAGE_LABELS[code] }),
+);
+
+export const MIC_LANG_OPTIONS = (["ja", "vi", "en", "zh"] as const).map(
+  (code) => ({ code, ...LANGUAGE_LABELS[code] }),
+);
 
 export function micLangOption(code: MicLang) {
-  return MIC_LANG_OPTIONS.find((o) => o.code === code) ?? MIC_LANG_OPTIONS[0];
+  return MIC_LANG_OPTIONS.find((o) => o.code === code) ?? { code: "en", ...LANGUAGE_LABELS.en };
+}
+
+function configuredMicLang(value: string) {
+  const lang = sttLangToSupported(value);
+  return MIC_LANG_OPTIONS.find((o) => o.code === (lang === "zhTW" ? "zh" : lang))?.code;
+}
+
+export function resolveDefaultMicLang(setting: string, locale: string): MicLang {
+  return configuredMicLang(setting) ?? configuredMicLang(locale) ?? "en";
 }

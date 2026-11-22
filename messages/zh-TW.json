@@ -1,6 +1,6 @@
 {
   "greeting": "您好！我是{name}。请问今天有什么可以为您服务的吗？可以使用下方的麦克风或输入框。",
-  "avatarNameMale": "一之濑",
+  "avatarNameMale": "Lee",
   "bottomBar": {
     "placeholder": "请输入问题，或按住麦克风说话",
     "recognizing": "识别中…",
@@ -51,7 +51,7 @@
     "futureNote": "语言、语音与模型设置将于未来版本推出。",
     "genderLabel": "虚拟人像",
     "genderFemale": "女性（Chi）",
-    "genderMale": "男性（瑛太）",
+    "genderMale": "男性（Lee）",
     "logout": "退出登录",
     "logoutFailed": "退出登录失败。请重试。"
   },
@@ -81,6 +81,11 @@
   "errors": {
     "speechUnsupported": "此浏览器不支持语音输入功能，请使用 Chrome 或 Edge。",
     "micPermissionDenied": "麦克风访问权限被拒绝，请检查浏览器设置。",
-    "speechUnavailable": "無法以回答的語言播放語音。"
+    "speechUnavailable": "無法播放{language}語音。",
+    "speechVoiceMissing": "此瀏覽器沒有{language}語音。您仍可閱讀回覆。",
+    "translationUnavailable": "尚未設定翻譯服務，無法使用口譯功能。",
+    "translationDemoUnavailable": "瀏覽器無法翻譯這段文字。試用時可選擇中文與英文，並輸入「你好」。",
+    "translationFailed": "無法翻譯此訊息。請重試。",
+    "chatFailed": "無法產生回覆。請重試。"
   }
 }

@@ -19,41 +19,41 @@ const LANG_TO_BCP47: Record<SupportedLang, string> = {
 
 const MALE_VOICE_HINT = /\b(?:male|man|an)\b|david|mark|george|daniel|ichiro|keita|nam[\s-]*minh|yunjian|yunxi|injoon/i;
 const FEMALE_VOICE_HINT = /female|woman|zira|samantha|victoria|haruka|nanami|ayumi|hoaimy|linh|xiaoxiao|sunhi/i;
-const PAUSE_PUNCT_RE = /[,、;:.。!?—]/;
-const PURE_PAUSE_PUNCT_RE = /^[\s,、;:.。!?—]+$/;
-const STRONG_PAUSE_RE = /[.。!?]/;
+const PURE_PAUSE_PUNCT_RE = /^[\s,、，;；:：.。!?！？—]+$/;
+const WORD_RE = /^[^\s,、，;；:：.。!?！？—]+/;
+const END_PUNCT_RE = /[,、，;；:：.。!?！？—]+$/;
+const FOLLOWING_PAUSE_RE = /^\s*[,、，;；:：.。!?！？—]/;
+const BROWSER_TTS_CHUNK_BYTES = 220;
 
-function pickVoice(synth: SpeechSynthesis, bcp47: string, gender: "female" | "male"): SpeechSynthesisVoice | null {
-  const voices = synth.getVoices();
+function matchingVoices(synth: SpeechSynthesis, bcp47: string, gender: "female" | "male"): SpeechSynthesisVoice[] {
   const locale = bcp47.toLowerCase();
   const prefix = locale.split("-")[0];
-  const exact = voices.filter((v) => v.lang.replace("_", "-").toLowerCase() === locale);
-  const byLang = exact.length
-    ? exact
-    : voices.filter((v) => v.lang.toLowerCase().split(/[-_]/)[0] === prefix);
-
   const hint = gender === "male" ? MALE_VOICE_HINT : FEMALE_VOICE_HINT;
-  const gendered = byLang.find((v) => hint.test(v.name));
-  return gendered ?? byLang[0] ?? null;
+  const voiceLocale = (voice: SpeechSynthesisVoice) => voice.lang.replace(/_/g, "-").toLowerCase();
+  const score = (voice: SpeechSynthesisVoice) =>
+    Number(voiceLocale(voice) === locale) * 4 + Number(hint.test(voice.name)) * 2 + Number(voice.localService === true);
+  return synth.getVoices()
+    .filter((voice) => voiceLocale(voice).split("-")[0] === prefix)
+    .sort((a, b) => score(b) - score(a));
 }
 
-function waitForVoice(synth: SpeechSynthesis, bcp47: string, opts: BrowserTtsOptions): Promise<SpeechSynthesisVoice | null> {
-  const readVoice = () => pickVoice(synth, bcp47, opts.gender);
-  const voice = readVoice();
-  if (voice || opts.signal.aborted) return Promise.resolve(voice);
+function waitForVoices(synth: SpeechSynthesis, bcp47: string, opts: BrowserTtsOptions): Promise<SpeechSynthesisVoice[]> {
+  const readVoices = () => matchingVoices(synth, bcp47, opts.gender);
+  const voices = readVoices();
+  if (voices.length || opts.signal.aborted) return Promise.resolve(voices);
   return new Promise((resolve) => {
-    const finish = (match: SpeechSynthesisVoice | null) => {
+    const finish = (matches: SpeechSynthesisVoice[]) => {
       window.clearTimeout(timer);
       synth.removeEventListener("voiceschanged", onVoicesChanged);
       opts.signal.removeEventListener("abort", onAbort);
-      resolve(match);
+      resolve(matches);
     };
     const onVoicesChanged = () => {
-      const match = readVoice();
-      if (match) finish(match);
+      const matches = readVoices();
+      if (matches.length) finish(matches);
     };
-    const onAbort = () => finish(null);
-    const timer = window.setTimeout(() => finish(readVoice()), 1000);
+    const onAbort = () => finish([]);
+    const timer = window.setTimeout(() => finish(readVoices()), 1800);
     synth.addEventListener("voiceschanged", onVoicesChanged);
     opts.signal.addEventListener("abort", onAbort, { once: true });
   });
@@ -74,6 +74,7 @@ export type BrowserTtsOptions = {
   gender: "female" | "male";
   muted: boolean;
   signal: AbortSignal;
+  onFailure?: (reason: "voice-missing" | "playback") => void;
   onSpeakingChange?: (speaking: boolean) => void;
   /**
    * Live mouth openness (0..1) driven by `onboundary` word events and comma/
@@ -84,32 +85,14 @@ export type BrowserTtsOptions = {
 };
 
 /**
- * Find normalized positions [0..1] of pause punctuation in `text` so even when
- * a browser voice does not emit `onboundary`, we can still dip the mouth closed
- * smoothly across commas and sentence breaks.
- */
-function findPauseWindows(text: string, estimatedMs: number): Array<{ start: number; end: number }> {
-  const len = Math.max(1, text.length);
-  const windows: Array<{ start: number; end: number }> = [];
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (!PAUSE_PUNCT_RE.test(ch)) continue;
-    const frac = i / len;
-    const width = (STRONG_PAUSE_RE.test(ch) ? 180 : 95) / estimatedMs;
-    windows.push({ start: frac, end: Math.min(1, frac + width) });
-  }
-  return windows;
-}
-
-/**
  * Fallback TTS using the browser's built-in `window.speechSynthesis` when the
  * server `/api/tts/synthesize` endpoint is unavailable (e.g. local frontend
  * demo without Cloud TTS keys).
  *
  * - Uses `utterance.onboundary` when emitted by the browser/voice so mouth
  *   opening follows actual words and closes cleanly during comma/period pauses.
- * - Falls back seamlessly to an estimated syllable rhythm (with punctuation
- *   pauses) when the voice does not emit `onboundary`.
+ * - Uses a light syllable rhythm while the voice is active if it does not emit
+ *   boundaries consistently.
  * Returns false if the browser cannot speak the requested language.
  */
 export async function speakWithBrowserTts(
@@ -118,25 +101,40 @@ export async function speakWithBrowserTts(
 ): Promise<boolean> {
   const trimmed = text.trim();
   if (!trimmed || opts.signal.aborted) return true;
-  if (typeof window === "undefined" || !("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
+  const noVoice = () => {
+    opts.onFailure?.("voice-missing");
     return false;
+  };
+  if (typeof window === "undefined" || !("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
+    return noVoice();
   }
   const synth = window.speechSynthesis;
-  const voice = await waitForVoice(synth, LANG_TO_BCP47[opts.lang], opts);
+  const voices = await waitForVoices(synth, LANG_TO_BCP47[opts.lang], opts);
   if (opts.signal.aborted) return true;
-  if (!voice) return false;
+  if (!voices.length) return noVoice();
 
-  try {
-    // Small, sequential utterances avoid browser limits on long speech.
-    for (const chunk of chunkTextByBytes(trimmed, 320)) {
+  // Keep browser utterances short, and wait for each to finish before queuing
+  // the next one. A long reply has no overall speaking deadline.
+  let voiceIndex = 0;
+  for (const chunk of chunkTextByBytes(trimmed, BROWSER_TTS_CHUNK_BYTES)) {
+    if (opts.signal.aborted) return true;
+    while (voiceIndex < voices.length) {
+      const result = await speakUtterance(synth, voices[voiceIndex], chunk, opts);
       if (opts.signal.aborted) return true;
-      if (!(await speakUtterance(synth, voice, chunk, opts))) return false;
+      if (result === "completed") break;
+      if (result === "interrupted") {
+        opts.onFailure?.("playback");
+        return false;
+      }
+      // A voice that failed before making any sound can be replaced safely.
+      voiceIndex++;
     }
-    return true;
-  } finally {
-    opts.onOpenness?.(0);
-    opts.onSpeakingChange?.(false);
+    if (voiceIndex === voices.length) {
+      opts.onFailure?.("playback");
+      return false;
+    }
   }
+  return true;
 }
 
 function speakUtterance(
@@ -144,18 +142,37 @@ function speakUtterance(
   voice: SpeechSynthesisVoice,
   text: string,
   opts: BrowserTtsOptions,
-): Promise<boolean> {
-  const estTotalMs = Math.max(1400, text.length * 72);
-  const pauseWindows = findPauseWindows(text, estTotalMs);
+): Promise<"completed" | "unstarted" | "interrupted"> {
   return new Promise((resolve) => {
     let settled = false;
-    let startedAt: number | null = null;
+    let started = false;
+    let mouthActive = false;
     let idleSince: number | null = null;
-    let hasBoundary = false;
     let activeWordStartMs = 0;
     let activeWordDurationMs = 0;
     let activeWordPeak = 0.8;
+    let activeSyllables = 1;
+    let closingWord = false;
+    let mouthFinished = false;
     const queuedAt = performance.now();
+    const spokenEnd = text.replace(/[\s\p{P}]+$/u, "").length;
+    const words = typeof Intl.Segmenter === "function"
+      ? new Intl.Segmenter(LANG_TO_BCP47[opts.lang], { granularity: "word" }).segment(text)
+      : null;
+
+    const stopMouth = () => {
+      if (!mouthActive) return;
+      mouthActive = false;
+      activeWordDurationMs = 0;
+      closingWord = false;
+      opts.onOpenness?.(0);
+      opts.onSpeakingChange?.(false);
+    };
+
+    const finishMouth = () => {
+      mouthFinished = true;
+      stopMouth();
+    };
 
     const finish = (completed: boolean) => {
       if (settled) return;
@@ -163,8 +180,8 @@ function speakUtterance(
       window.clearInterval(pollTimer);
       window.clearInterval(envelopeTimer);
       opts.signal.removeEventListener("abort", onAbort);
-      opts.onOpenness?.(0);
-      resolve(completed);
+      stopMouth();
+      resolve(completed ? "completed" : started ? "interrupted" : "unstarted");
     };
     const onAbort = () => {
       finish(true);
@@ -181,93 +198,101 @@ function speakUtterance(
     utterance.pitch = opts.gender === "male" ? 0.92 : 1.05;
 
     const markStarted = () => {
-      if (settled || startedAt !== null) return;
-      startedAt = performance.now();
+      if (settled || mouthActive || mouthFinished) return;
+      started = true;
+      mouthActive = true;
       opts.onSpeakingChange?.(true);
+      opts.onOpenness?.(null);
     };
     utterance.onstart = markStarted;
+    utterance.onpause = stopMouth;
+    utterance.onresume = markStarted;
 
     utterance.onboundary = (ev) => {
-      if (settled) return;
+      if (settled || synth.paused || mouthFinished) return;
       markStarted();
-      hasBoundary = true;
       const idx = Math.max(0, ev.charIndex ?? 0);
-      let len = ev.charLength && ev.charLength > 0 ? ev.charLength : 0;
-      if (!len) {
-        const rest = text.slice(idx);
-        const m = rest.match(/^[^\s,、;:.。!?—]+/);
-        len = m ? m[0].length : 3;
+      if (idx >= spokenEnd) {
+        finishMouth();
+        return;
       }
-      const rawWord = text.slice(idx, idx + len).trim();
-      activeWordStartMs = performance.now();
-      // Ignore pure-punctuation boundary events; let the mouth close on pauses.
+      // Some engines emit a sentence boundary with the whole sentence's length.
+      if (ev.name === "sentence") return;
+      const segment = words?.containing(idx);
+      const len = ev.charLength || (segment ? segment.index + segment.segment.length - idx : 0);
+      const wordLength = len || text.slice(idx).match(WORD_RE)?.[0].length || 3;
+      const rawWord = text.slice(idx, idx + wordLength).trim();
+      // Only a boundary reported by the voice can mark a punctuation pause.
       if (!rawWord || PURE_PAUSE_PUNCT_RE.test(rawWord)) {
         activeWordDurationMs = 0;
+        closingWord = true;
         opts.onOpenness?.(0);
         return;
       }
-      const word = rawWord.replace(/[,、;:.。!?—]+$/g, "");
-      if (!word) {
-        activeWordDurationMs = 0;
-        opts.onOpenness?.(0);
-        return;
+      const word = rawWord.replace(END_PUNCT_RE, "");
+      const wordEnd = idx + wordLength;
+      const now = performance.now();
+      const afterPause = closingWord && now - activeWordStartMs >= activeWordDurationMs;
+      activeWordStartMs = now;
+      closingWord = wordEnd >= spokenEnd || END_PUNCT_RE.test(rawWord) || FOLLOWING_PAUSE_RE.test(text.slice(wordEnd));
+      activeWordDurationMs = closingWord
+        ? Math.min(1020, 190 + word.length * 92)
+        : Math.max(150, Math.min(480, word.length * 64));
+      activeWordPeak = Math.min(0.8, 0.62 + word.length * 0.022);
+      if (opts.lang === "en") {
+        const vowelGroups = word.match(/[aeiouy]+/gi)?.length ?? 1;
+        const silentE = vowelGroups > 1 && /[^aeiouy]e$/i.test(word);
+        activeSyllables = Math.min(5, vowelGroups - Number(silentE));
+      } else {
+        activeSyllables = Math.min(5, Math.max(1, Math.round(word.length / 3)));
       }
-      // Scale spoken word window by character length (150ms..480ms).
-      activeWordDurationMs = Math.max(150, Math.min(480, word.length * 64));
-      // Vary peak openness gently per word so consecutive words look alive.
-      const hash = (idx * 31 + word.length * 17) % 10;
-      activeWordPeak = 0.58 + (hash / 9) * 0.34;
-      // Open promptly on word onset rather than waiting for the next 35ms tick.
-      opts.onOpenness?.(Math.min(0.95, activeWordPeak * 0.72));
+      // Start gently from a pause. Between continuous words the scheduled
+      // envelope takes over, avoiding an abrupt reset at every boundary.
+      if (afterPause) opts.onOpenness?.(0.14);
     };
 
     utterance.onend = () => finish(true);
     utterance.onerror = () => finish(false);
 
-    // 35ms envelope driver:
-    // - With `onboundary`: shapes a crisp syllable pulse for the active word,
-    //   then closes smoothly to 0 during comma/period pauses until next word.
-    // - Without `onboundary`: dips cleanly to 0 across estimated comma/period
-    //   windows and passes `null` otherwise (estimated syllable oscillator).
+    // A voice may report a word boundary late or omit one entirely. Once a
+    // word estimate runs out, keep a gentle rhythm unless it ends in a pause.
+    // An estimated pause only closes the mouth. End/poll owns playback state.
     const envelopeTimer = window.setInterval(() => {
-      if (settled || startedAt === null) return;
+      if (settled || !mouthActive) return;
       const now = performance.now();
-      if (hasBoundary) {
-        const dtMs = now - activeWordStartMs;
-        if (activeWordDurationMs <= 0 || dtMs > activeWordDurationMs) {
-          // Some voices stop emitting boundaries mid-sentence. Briefly close
-          // at the word edge, then follow the estimated rhythm if still speaking.
-          opts.onOpenness?.(dtMs - activeWordDurationMs < 130 || !synth.speaking ? 0 : null);
-          return;
-        }
-        const u = dtMs / activeWordDurationMs;
-        const syllables = Math.max(1, Math.round(activeWordDurationMs / 155));
-        const pulse = Math.abs(Math.sin(u * Math.PI * syllables));
-        const envelope = Math.sin(u * Math.PI); // taper cleanly at word edges
-        const openness = Math.min(0.95, activeWordPeak * (0.35 + 0.65 * pulse) * (0.45 + 0.55 * envelope));
-        opts.onOpenness?.(openness);
-      } else {
-        const frac = (now - startedAt) / estTotalMs;
-        const inPause = pauseWindows.some((w) => frac >= w.start && frac <= w.end);
-        opts.onOpenness?.(inPause ? 0 : null);
+      const elapsed = now - activeWordStartMs;
+      if (activeWordDurationMs === 0 || elapsed >= activeWordDurationMs) {
+        opts.onOpenness?.(closingWord ? 0 : null);
+        return;
       }
+      const progress = elapsed / activeWordDurationMs;
+      const pulse = Math.abs(Math.sin(progress * Math.PI * activeSyllables));
+      const attack = Math.min(1, elapsed / 55);
+      const release = closingWord ? Math.min(1, (activeWordDurationMs - elapsed) / 100) : 1;
+      opts.onOpenness?.(activeWordPeak * (0.55 + 0.45 * pulse) * attack * release);
     }, 35);
 
     // Allow for missing end events without imposing a deadline on active speech.
     const pollTimer = window.setInterval(() => {
       if (settled) return;
       const now = performance.now();
-      if (synth.speaking) {
+      if (synth.paused) {
+        stopMouth();
+        idleSince = null;
+      } else if (synth.speaking) {
         markStarted();
-      }
-      if (startedAt === null && now - queuedAt > 8000) {
+        idleSince = null;
+      } else if (!started && now - queuedAt > 8000) {
         finish(false);
         cancelBrowserTts();
-      } else if (synth.speaking || synth.pending || synth.paused) {
+      } else if (synth.pending) {
+        stopMouth();
         idleSince = null;
-      } else if (startedAt !== null) {
+      } else if (started) {
         idleSince ??= now;
-        if (now - idleSince >= 240) finish(true);
+        const idleMs = now - idleSince;
+        if (idleMs >= 80) stopMouth();
+        if (idleMs >= 400) finish(true);
       }
     }, 60);
 

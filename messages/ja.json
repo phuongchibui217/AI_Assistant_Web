@@ -1,6 +1,6 @@
 {
   "greeting": "こんにちは！{name}です。本日は私にご質問ですね？画面下のマイクか入力欄からどうぞ。",
-  "avatarNameMale": "一ノ瀬",
+  "avatarNameMale": "Lee",
   "bottomBar": {
     "placeholder": "質問を入力またはマイクボタン長押しで話してください",
     "recognizing": "認識中…",
@@ -51,7 +51,7 @@
     "futureNote": "言語・音声・モデル切替は次のリリースで追加予定です。",
     "genderLabel": "アバター",
     "genderFemale": "女性（Chi）",
-    "genderMale": "男性（瑛太）",
+    "genderMale": "男性（Lee）",
     "logout": "ログアウト",
     "logoutFailed": "ログアウトできませんでした。もう一度お試しください。"
   },
@@ -81,6 +81,11 @@
   "errors": {
     "speechUnsupported": "音声入力に対応していないブラウザです。Chrome または Edge をご利用ください。",
     "micPermissionDenied": "マイクへのアクセスが拒否されました。ブラウザの設定をご確認ください。",
-    "speechUnavailable": "回答の言語で音声を再生できませんでした。"
+    "speechUnavailable": "{language}の音声を再生できませんでした。",
+    "speechVoiceMissing": "このブラウザーには{language}の音声がありません。回答はテキストで読めます。",
+    "translationUnavailable": "翻訳サービスが設定されていないため、通訳を利用できません。",
+    "translationDemoUnavailable": "ブラウザーでこの文を翻訳できません。デモでは日本語と英語を選び、「こんにちは」をお試しください。",
+    "translationFailed": "翻訳できませんでした。もう一度お試しください。",
+    "chatFailed": "回答を作成できませんでした。もう一度お試しください。"
   }
 }

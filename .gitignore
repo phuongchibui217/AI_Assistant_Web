@@ -22,6 +22,7 @@ next-env.d.ts
 /demo-data.json
 /demo-data.json.*.tmp
 /local-settings.json
+/kb-uploads/
 
 # logs
 *.log

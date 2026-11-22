@@ -29,9 +29,7 @@ const FRAME_TIME_FAST = 0.12;
 const FRAME_TIME_SLOW = 0.3;
 const FADE_OUT_RATE = 15;
 const FADE_IN_RATE = 10;
-// Unity slow-close fade rate. Combined with the lip-sync.ts 300ms voice-off
-// debounce, the full mouth-close timeline ≈ 0.6s (300ms offset hold +
-// ~300ms fade) which is close enough to Unity's m_VoiceResultTimeTest budget.
+// Default close rate for cycle-mode transitions.
 const SLOW_CLOSE_RATE = 1 / FRAME_TIME_SLOW;
 const BRIEF_SILENCE_MAX_S = 0.27;
 /**
@@ -72,6 +70,8 @@ export type MouthFadeTuning = {
   minFrameTime?: number;
   /** Blend adjacent amplitude frames instead of stepping to a single pose. */
   blendAdjacentFrames?: boolean;
+  /** Use pre-rendered transitions without compositing two mouth poses. */
+  singleAmplitudePose?: boolean;
 };
 
 // Amplitude mode: how fast the shown openness eases toward the target fed by
@@ -85,9 +85,12 @@ const OPENNESS_EASE_TAU_S = 0.035;
 // roughly this often anyway.
 const AMP_MIN_FRAME_TIME_S = 0.13;
 
-const BLENDED_OPENNESS_EASE_TAU_S = 0.05;
+const BLENDED_OPENNESS_EASE_TAU_S = 0.043;
 // Keep loud peaks within the smaller speaking poses.
-const BLENDED_MAX_OPENNESS = 0.64;
+const BLENDED_MAX_OPENNESS = 0.58;
+const POSE_ATTACK_S = 0.046;
+const POSE_RELEASE_S = 0.071;
+const POSE_END_RELEASE_S = 0.021;
 
 export class MouthAnimator {
   private readonly meshes: MouthMeshes;
@@ -100,6 +103,7 @@ export class MouthAnimator {
   private readonly mode: "cycle" | "amplitude";
   private readonly minFrameTime: number;
   private readonly blendAdjacentFrames: boolean;
+  private readonly singleAmplitudePose: boolean;
 
   private phase: Phase = "silent";
   private cycleIndex = 0;
@@ -131,6 +135,7 @@ export class MouthAnimator {
     this.mode = tuning?.mode ?? "cycle";
     this.minFrameTime = tuning?.minFrameTime ?? AMP_MIN_FRAME_TIME_S;
     this.blendAdjacentFrames = this.mode === "amplitude" && tuning?.blendAdjacentFrames === true;
+    this.singleAmplitudePose = this.mode === "amplitude" && tuning?.singleAmplitudePose === true;
     if (this.blendAdjacentFrames) {
       // renderOrder takes precedence over z for transparent meshes.
       this.meshes.silentClosed.renderOrder = 101;
@@ -145,7 +150,7 @@ export class MouthAnimator {
    * `silentClosed` so fading `silentClosed` out never flashes the backdrop.
    */
   private enterAmplitudeSpeaking(): void {
-    if (this.blendAdjacentFrames) return;
+    if (this.blendAdjacentFrames || this.singleAmplitudePose) return;
 
     this.prevCycleIndex = null;
     this.amplitudeHoldElapsed = this.minFrameTime;
@@ -169,6 +174,7 @@ export class MouthAnimator {
   /** Drive from a high-level voice signal (e.g. lip-sync RMS > threshold). */
   setSpeaking(isSpeaking: boolean): void {
     const wasActive = this.speaking || this.syntheticSpeaking;
+    if (isSpeaking) this.fastClosing = false;
     if (isSpeaking && this.phase !== "speaking") {
       this.phase = "speaking";
       this.cycleIndex = 0;
@@ -186,24 +192,28 @@ export class MouthAnimator {
 
   /** Drive mouth animation without an audio AnalyserNode (both cycle and amplitude modes). */
   setSyntheticSpeaking(isSpeaking: boolean): void {
-    const wasActive = this.speaking || this.syntheticSpeaking;
-    this.syntheticSpeaking = isSpeaking;
-    if (isSpeaking) {
-      this.fastClosing = false;
-      this.setSpeaking(true);
-      if (this.mode === "amplitude" && !wasActive) {
-        this.enterAmplitudeSpeaking();
-      }
-    } else {
-      this.externalOpenness = null;
-      this.opennessTarget = 0;
-      if (!this.blendAdjacentFrames) this.openness = 0;
-      this.syntheticElapsed = 0;
-      this.speaking = false;
-      this.amplitudeHoldElapsed = this.minFrameTime;
-      this.phase = "silent";
-      this.fastClosing = true;
+    if (!isSpeaking) {
+      this.stopSpeech();
+      return;
     }
+    const wasActive = this.speaking || this.syntheticSpeaking;
+    this.syntheticSpeaking = true;
+    this.setSpeaking(true);
+    if (this.mode === "amplitude" && !wasActive) {
+      this.enterAmplitudeSpeaking();
+    }
+  }
+
+  stopSpeech(): void {
+    this.syntheticSpeaking = false;
+    this.externalOpenness = null;
+    this.opennessTarget = 0;
+    if (!this.blendAdjacentFrames && !this.singleAmplitudePose) this.openness = 0;
+    this.syntheticElapsed = 0;
+    this.speaking = false;
+    this.amplitudeHoldElapsed = this.minFrameTime;
+    this.phase = "silent";
+    this.fastClosing = true;
   }
 
   /**
@@ -235,10 +245,15 @@ export class MouthAnimator {
             0.34 * Math.sin(this.syntheticElapsed * 13.0) +
             0.22 * Math.sin(this.syntheticElapsed * 21.7 + 1.1) +
             0.12 * Math.sin(this.syntheticElapsed * 7.3 + 2.4);
-          this.opennessTarget = Math.max(0.0, Math.min(1.0, env));
+          const opening = Math.max(0, Math.min(1, env));
+          // Without word timing, keep the estimated jaw motion within a small
+          // talking range. Every guessed syllable needn't reach a full vowel.
+          this.opennessTarget = this.singleAmplitudePose ? opening * 0.55 : opening;
         }
       }
-      if (this.blendAdjacentFrames) {
+      if (this.singleAmplitudePose) {
+        this.tickSingleAmplitude(dt, isActiveSpeech);
+      } else if (this.blendAdjacentFrames) {
         this.tickBlendedAmplitude(dt, isActiveSpeech);
       } else if (isActiveSpeech) {
         this.tickAmplitude(dt);
@@ -256,14 +271,34 @@ export class MouthAnimator {
     }
   }
 
+  private tickSingleAmplitude(dt: number, speaking: boolean): void {
+    const target = speaking ? this.opennessTarget : 0;
+    const opening = target > this.openness;
+    const tau = this.fastClosing ? POSE_END_RELEASE_S : opening ? POSE_ATTACK_S : POSE_RELEASE_S;
+    const delta = (target - this.openness) * (1 - Math.exp(-dt / tau));
+    const maxStep = dt * (this.fastClosing ? 20 : 11);
+    this.openness += THREE.MathUtils.clamp(delta, -maxStep, maxStep);
+
+    const index = Math.round(this.openness * (this.meshes.cycle.length - 1));
+    const resting = !speaking && index === 0;
+    this.meshes.silentClosed.material.opacity = resting ? 1 : 0;
+    this.meshes.silentClosed.visible = resting;
+    for (const [i, mesh] of this.meshes.cycle.entries()) {
+      mesh.visible = !resting && i === index;
+      mesh.material.opacity = mesh.visible ? 1 : 0;
+    }
+  }
+
   private tickBlendedAmplitude(dt: number, speaking: boolean): void {
     const target = speaking ? this.opennessTarget * BLENDED_MAX_OPENNESS : 0;
-    const ease = 1 - Math.exp(-dt / BLENDED_OPENNESS_EASE_TAU_S);
+    const tau = this.fastClosing ? 0.025 : BLENDED_OPENNESS_EASE_TAU_S;
+    const ease = 1 - Math.exp(-dt / tau);
     this.openness += (target - this.openness) * ease;
     if (target === 0 && this.openness < 0.01) this.openness = 0;
 
     const closed = this.meshes.silentClosed.material;
-    this.fadeMaterial(closed, speaking ? 0 : 1, dt, speaking ? this.fadeInRate : this.silentCloseRate);
+    const closeRate = this.fastClosing ? Math.max(this.silentCloseRate, 18) : this.silentCloseRate;
+    this.fadeMaterial(closed, speaking ? 0 : 1, dt, speaking ? this.fadeInRate : closeRate);
 
     const position = this.openness * (this.meshes.cycle.length - 1);
     const lower = Math.floor(position);
@@ -281,7 +316,10 @@ export class MouthAnimator {
         frame.renderOrder = 100;
       }
     }
-    if (!showSpeakingFrames) this.openness = 0;
+    if (!showSpeakingFrames) {
+      this.openness = 0;
+      this.fastClosing = false;
+    }
   }
 
   /**
@@ -476,6 +514,10 @@ export class MouthAnimator {
   private applyInitialAlpha(): void {
     this.meshes.silentClosed.material.opacity = 1;
     this.meshes.silentOpen.material.opacity = 0;
-    for (const m of this.meshes.cycle) m.material.opacity = 0;
+    if (this.singleAmplitudePose) this.meshes.silentOpen.visible = false;
+    for (const mesh of this.meshes.cycle) {
+      mesh.material.opacity = 0;
+      if (this.singleAmplitudePose) mesh.visible = false;
+    }
   }
 }

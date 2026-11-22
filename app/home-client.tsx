@@ -14,11 +14,13 @@ export function HomeClient({
   defaultMicLang,
   defaultTranslateLangA,
   defaultTranslateLangB,
+  cloudTranslationEnabled,
 }: {
   canSignOut: boolean;
   defaultMicLang: string;
   defaultTranslateLangA: string;
   defaultTranslateLangB: string;
+  cloudTranslationEnabled: boolean;
 }) {
   return (
     <AppShell
@@ -26,6 +28,7 @@ export function HomeClient({
       defaultMicLang={defaultMicLang}
       defaultTranslateLangA={defaultTranslateLangA}
       defaultTranslateLangB={defaultTranslateLangB}
+      cloudTranslationEnabled={cloudTranslationEnabled}
     />
   );
 }

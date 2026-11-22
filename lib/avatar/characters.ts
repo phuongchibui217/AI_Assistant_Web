@@ -1,14 +1,10 @@
 /**
  * Character descriptors. The avatar engine (`avatar.ts`) builds its scene graph
- * from one of these, so the same animators/renderer drive either the female
- * (富士崎) or the male (高崎, placeholder) sprite set.
+ * from one of these, so the same animators and renderer drive Chi and Lee.
  *
  * Anchors are in the shared Pixi layout space (1536x1024, see positions.ts).
- * The female config reuses the existing, calibrated POS/Z/sprite-layers values
- * verbatim so swapping to a config-driven build does not move the female
- * avatar. The male config is a FIRST DRAFT to be calibrated with the in-app
- * avatar-calibrator (its sprites are pre-aligned in one 850x850 canvas, so all
- * face-area layers share a single anchor).
+ * Chi uses the calibrated POS/Z values. Lee uses crops aligned to his base
+ * photo, with a shared neck pivot for the head and expression layers.
  */
 
 import {
@@ -20,9 +16,10 @@ import {
   BLINK_FRAMES,
 } from "./sprite-layers";
 import { POS, Z } from "./positions";
+import type { SpriteBounds } from "./renderer";
 
 export type Anchor = { x: number; y: number };
-export type Layer = { url: string; anchor: Anchor; z: number };
+export type Layer = { url: string; anchor: Anchor; z: number; bounds?: SpriteBounds };
 
 export type CharacterConfig = {
   id: "female" | "male";
@@ -61,9 +58,7 @@ export type CharacterConfig = {
     offsetYPx: number;
   };
 
-  /** Body sprite stack, back-to-front by z. A single flat sprite for the
-   *  female; layered (shirt/tie/collar/suit) for the male so the neck can sit
-   *  between the shirt and the jacket. */
+  /** Body sprites, drawn back-to-front by z. */
   body: Layer[];
   /** Separate arm groups for the wave gesture; null when the body is flat. */
   arms: { left: Layer; right: Layer } | null;
@@ -86,6 +81,8 @@ export type CharacterConfig = {
   eyeBg: Layer[];
   eyeballLeft: Layer;
   eyeballRight: Layer;
+  /** The portrait already contains the resting eyes and eyebrows. */
+  bakedEyes?: boolean;
 
   /** 4 lid frames mapped onto the blink animation slots. */
   blink: {
@@ -107,6 +104,9 @@ export type CharacterConfig = {
      *  the live eye should stay visible under the near-open frames rather than
      *  exposing the baked-open eye. Omit/false for the female (she hides them). */
     keepEyeBgDuringBlink?: boolean;
+    /** Time between eyelid poses in the normal blink. */
+    frameTime?: number;
+    bounds?: SpriteBounds;
     anchor: Anchor;
     z: number;
   };
@@ -119,6 +119,7 @@ export type CharacterConfig = {
     silentOpen: string;
     /** Always-on closed-lips backdrop behind the cycle frames. */
     backdrop: string;
+    bounds?: SpriteBounds;
     anchor: Anchor;
     z: number;
     zSilent: number;
@@ -139,6 +140,10 @@ export type CharacterConfig = {
     minFrameTime?: number;
     /** Blend adjacent poses as the audio envelope rises or falls. */
     blendAdjacentFrames?: boolean;
+    /** Display one complete pose at a time, including any authored in-betweens. */
+    singleAmplitudePose?: boolean;
+    /** Start and end of the upper alpha feather, measured down from the sprite top. */
+    upperEdgeFeather?: { start: number; end: number };
   };
 };
 
@@ -250,15 +255,17 @@ export const FEMALE: CharacterConfig = {
     silentCloseRate: 10,
     mode: "amplitude",
     blendAdjacentFrames: true,
+    upperEdgeFeather: { start: 304.5, end: 311.5 },
   },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Male (高崎, placeholder) - DRAFT positions to be calibrated in-app. Sprites
-// are pre-aligned in one 850x850 canvas, so every face-area layer shares
-// `mFace`; only the body/neck differ. Assets under /avatar-male/ (ascii names).
-// ─────────────────────────────────────────────────────────────────────────────
-const M = "/avatar-male";
+// Lee uses Eita's sprite layout with timing tuned for his portrait.
+const M = "/avatar-male/lee/rig";
+const leeMouthFrames = Array.from({ length: 10 }, (_, index) => {
+  const pose = `${M}/mouth_${String(index).padStart(2, "0")}.png`;
+  return index === 9 ? [pose] : [pose, `${M}/mid_${index}_${index + 1}.png`];
+}).flat();
 // Shared face anchor (all male face-area sprites are pre-aligned in the 850 canvas).
 const mFace: Anchor = { x: 768, y: 240 };
 // Shared body anchor (all body sub-sprites are pre-aligned in the 1273x1770 canvas).
@@ -291,9 +298,9 @@ const mZ = {
 export const MALE: CharacterConfig = {
   id: "male",
   head: mFace,
-  // Larger swing than the female: the 850 face is scaled down more, so the
-  // iris needs a bigger px offset for the same on-screen movement.
-  gaze: { ampX: 8, ampY: 6.6 },
+  gaze: { ampX: 0, ampY: 0 },
+  bakedEyes: true,
+  headSwayScale: 0.5,
   // Scaled so the male shoulders match the female's on-screen width
   // (female 633px @ 0.85 vs male 1195px -> 0.85 * 633/1195). visualBottomY is
   // the body plane's bottom edge (anchor 1382 + 1770/2); avatarTopY the face
@@ -310,27 +317,24 @@ export const MALE: CharacterConfig = {
   // anchors are calibrated independently in-app (the neck z=0.01 sits behind the
   // body stack, so a small face/body vertical gap is hidden by the suit).
   body: [
-    { url: `${M}/collar_back.png`, anchor: mBody, z: mZ.collarBack },
-    { url: `${M}/shirt.png`, anchor: mBody, z: mZ.shirt },
-    { url: `${M}/tie.png`, anchor: mBody, z: mZ.tie },
-    { url: `${M}/arm_right.png`, anchor: { x: 773, y: 1243 }, z: mZ.arm },
-    { url: `${M}/arm_left.png`, anchor: { x: 783, y: 1228 }, z: mZ.arm },
-    { url: `${M}/collar.png`, anchor: mBody, z: mZ.collar },
-    { url: `${M}/suit.png`, anchor: { x: 775, y: 1251 }, z: mZ.suit },
+    { url: `${M}/collar_back.png`, anchor: mBody, z: mZ.collarBack, bounds: [458, 75, 813, 300] },
+    { url: `${M}/shirt.png`, anchor: mBody, z: mZ.shirt, bounds: [444, 71, 848, 732] },
+    { url: `${M}/tie.png`, anchor: mBody, z: mZ.tie, bounds: [550, 192, 738, 760] },
+    { url: `${M}/arm_right.png`, anchor: { x: 773, y: 1243 }, z: mZ.arm, bounds: [50, 197, 715, 1635] },
+    { url: `${M}/arm_left.png`, anchor: { x: 783, y: 1228 }, z: mZ.arm, bounds: [542, 208, 1204, 1650] },
+    { url: `${M}/collar.png`, anchor: mBody, z: mZ.collar, bounds: [450, 71, 834, 387] },
+    { url: `${M}/suit.png`, anchor: { x: 775, y: 1251 }, z: mZ.suit, bounds: [173, 74, 1074, 1770] },
   ],
   // Static sleeves are part of the body stack above; no wave-gesture arm groups.
   arms: null,
-  // Neck (顔_首) is in the pre-aligned 850 face canvas (shares mFace) and sits
-  // at z between the shirt assembly and the jacket.
-  // face.png already bakes the neck in; the separate sprite drifted apart from
-  // it under sway (different parents) and doubled up, so it's kept only as
-  // the head-sway pivot anchor, not actually rendered (renderNeck: false).
-  neck: { url: `${M}/neck.png`, anchor: { x: mFace.x - 2, y: mFace.y }, z: mZ.neck },
+  // The face sprite includes the neck. Pivot at the collar so the two stay
+  // aligned during a tilt.
+  neck: { url: `${M}/neck.png`, anchor: { x: mFace.x + 5, y: 515 }, z: mZ.neck },
   renderNeck: false,
   // Full-face base (顔_全体): provides the natural brows + skin; the overlay
   // eyes/mouth below sit on top and cover the baked features when animating.
-  face: { url: `${M}/face.png`, anchor: mFace, z: mZ.face },
-  bangs: { url: `${M}/bangs.png`, anchor: mFace, z: mZ.bangs },
+  face: { url: `${M}/face.png`, anchor: mFace, z: mZ.face, bounds: [178, 16, 667, 758] },
+  bangs: { url: `${M}/bangs.png`, anchor: mFace, z: mZ.bangs, bounds: [178, 16, 663, 339] },
   eyeBg: [
     { url: `${M}/eye_white_right.png`, anchor: mFace, z: mZ.eyeWhite },
     { url: `${M}/eye_white_left.png`, anchor: mFace, z: mZ.eyeWhite },
@@ -359,6 +363,8 @@ export const MALE: CharacterConfig = {
     // Keep the live eye visible under the lid: the lid sits on the top layer
     // (mZ.blink) and covers the closed eye fully.
     keepEyeBgDuringBlink: true,
+    frameTime: 0.022,
+    bounds: [289, 343, 565, 415],
     anchor: mFace,
     z: mZ.blink,
   },
@@ -367,41 +373,21 @@ export const MALE: CharacterConfig = {
     right: { url: `${M}/eyebrow_right.png`, anchor: mFace, z: mZ.eyebrow },
   },
   mouth: {
-    cycle: Array.from({ length: 10 }, (_, i) => `${M}/mouth_${String(i).padStart(2, "0")}.png`),
+    cycle: leeMouthFrames,
     silentClosed: `${M}/mouth_00.png`,
     silentOpen: `${M}/mouth_01.png`,
-    // Full-face backdrop: besides covering the baked-in mouth during cycle
-    // mid-fades, it also overlays natural eyes on top of the raw eye_white +
-    // eyeball layers. Do NOT swap this for a mouth-only sprite - that exposes
-    // the raw eyes ("googly eyes").
+    // Aligned lip backdrop leaves the eyes and the rest of the portrait intact.
     backdrop: `${M}/mouth_backdrop.png`,
+    bounds: [344, 505, 522, 611],
     anchor: mFace,
     z: mZ.mouth,
     zSilent: mZ.mouthSilent,
     zBackdrop: mZ.mouthBackdrop,
-    // Mirror the female's cross-fade FEEL, scaled for the denser cycle. The
-    // female fades a frame in over ~83% of her 0.12s frame interval (rate 10).
-    // The male cycle is ~2x denser so its interval is halved to 0.06s; to keep
-    // the same fade-fraction-per-frame the rates are doubled (10->20, 15->30).
-    // Same per-frame blend as the female, just over smaller (interpolated) shape
-    // deltas, so it reads as her natural motion (2026-07-02).
-    // Softened 16/24 -> 11/17 (2026-07-03) to lengthen the frame overlap for a
-    // touch more motion-blur smear on the photoreal mouth. The amplitude
-    // min-frame gate (0.13s) caps the swap rate, so the slower fade blends
-    // rather than piling frames into ghosting.
     fadeInRate: 11,
     fadeOutRate: 17,
-    frameTime: 0.06,
-    // The male backdrop (mouth_backdrop.png) is a full face with NO mouth (it
-    // covers the raw eyes). Close the mouth fast at sentence end so the cycle
-    // fade-out and this fade-in cross over without exposing the mouthless
-    // backdrop (the "no mouth" flash). Female's backdrop has a mouth -> she
-    // keeps the slow ease.
-    silentCloseRate: 30,
-    // Amplitude-driven: the frame index tracks the audio envelope so the mouth
-    // opening matches the sound, and silence -> frame 0 (closed) with no
-    // end-of-utterance flash.
+    // Each frame represents a step of jaw opening within the same mouth shape.
     mode: "amplitude",
+    singleAmplitudePose: true,
   },
 };
 

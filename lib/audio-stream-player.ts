@@ -27,10 +27,11 @@ const MAKEUP_GAIN = 2;
  * reads each sample ~this many seconds BEFORE it reaches the speakers. The mouth
  * (driven by the analyser) therefore leads the sound slightly, cancelling the
  * animation pipeline latency (render frame + envelope attack) so the opening
- * lands in sync instead of trailing. SALSA calls this "playhead bias". 50 ms is
- * imperceptible as an audio delay but covers ~1-2 frames + the envelope attack.
+ * lands in sync instead of trailing. The analyser is sampled before each
+ * animation tick, so it only needs 30 ms of lead.
  */
-const LIP_SYNC_LOOKAHEAD_S = 0.05;
+const LIP_SYNC_LOOKAHEAD_S = 0.03;
+const OUTPUT_TAIL_S = LIP_SYNC_LOOKAHEAD_S + 0.02;
 
 /**
  * Plays a stream of PCM16 mono chunks from Gemini Live using Web Audio.
@@ -277,13 +278,21 @@ export class AudioStreamPlayer {
     this.gainNode.gain.value = muted ? 0 : MAKEUP_GAIN;
   }
 
+  private hasReachedPlaybackEnd(): boolean {
+    return this.nextStartFrame === 0 ||
+      this.audioContext.currentTime >= this.nextStartFrame / this.bufferRate + OUTPUT_TAIL_S;
+  }
+
+  hasPlayback(): boolean {
+    return this.audioContext.state === "running" && !this.hasReachedPlaybackEnd();
+  }
+
   /** Wait until queued PCM and the delayed output have finished. */
   waitForIdle(signal: AbortSignal): Promise<void> {
     const isIdle = () =>
       signal.aborted ||
-      this.nextStartFrame === 0 ||
       this.audioContext.state === "closed" ||
-      this.audioContext.currentTime >= this.nextStartFrame / this.bufferRate + LIP_SYNC_LOOKAHEAD_S + 0.02;
+      this.hasReachedPlaybackEnd();
     if (isIdle()) return Promise.resolve();
     return new Promise((resolve) => {
       const finish = () => {

@@ -22,18 +22,21 @@ export async function POST(req: Request): Promise<Response> {
   }
   if (
     typeof payload.targetLang !== "string" ||
-    !(payload.targetLang in VOICE_FOR_LANG)
+    !Object.hasOwn(VOICE_FOR_LANG, payload.targetLang)
   ) {
     return NextResponse.json({ error: "Invalid 'targetLang'" }, { status: 400 });
   }
 
-  const controller = new AbortController();
-  req.signal.addEventListener("abort", () => controller.abort());
+  if (!process.env.GEMINI_API_KEY?.trim()) {
+    return NextResponse.json({ error: "Translation service is not configured" }, { status: 503 });
+  }
 
-  const text = await translateText(
-    payload.text.trim(),
-    payload.targetLang as SupportedLang,
-    controller.signal,
-  );
-  return NextResponse.json({ text });
+  try {
+    const text = await translateText(payload.text.trim(), payload.targetLang as SupportedLang, req.signal);
+    return NextResponse.json({ text });
+  } catch (error) {
+    if (req.signal.aborted) return NextResponse.json({ error: "Aborted" }, { status: 499 });
+    console.warn("[/api/translate] Translation failed:", error);
+    return NextResponse.json({ error: "Translation failed" }, { status: 502 });
+  }
 }

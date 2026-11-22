@@ -24,6 +24,23 @@ export async function PUT(req: Request): Promise<Response> {
     const body = (await req.json()) as Partial<DemoStoreState>;
     const { clientUsername, clientPassword, clientPasswordHash, ...patch } = body;
 
+    if (Array.isArray(patch.files)) {
+      // A tab may have loaded its snapshot before another uploaded originals.
+      const stored = readDemoStore().files.filter((file) => file.uploadKey);
+      const incoming = patch.files;
+      const storedById = new Map(stored.map((file) => [file.id, file]));
+      const incomingIds = new Set(incoming.map((file) => file.id));
+      patch.files = [
+        ...incoming.map((update) => {
+          const file = storedById.get(update.id);
+          if (!file) return update;
+          if (update.uploadKey !== file.uploadKey) return file;
+          return { ...file, status: update.status, updated: update.updated, deleted: file.deleted || update.deleted };
+        }),
+        ...stored.filter((file) => !incomingIds.has(file.id)),
+      ];
+    }
+
     if (clientUsername !== undefined || clientPassword !== undefined || clientPasswordHash !== undefined) {
       if (
         typeof clientUsername !== "string" || !clientUsername.trim() ||

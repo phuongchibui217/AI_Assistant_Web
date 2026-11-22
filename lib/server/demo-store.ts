@@ -35,6 +35,8 @@ export interface DemoFile {
   folder: string;
   sourceUrl?: string;
   rawContent?: string;
+  uploadKey?: string;
+  mediaType?: string;
   deleted?: boolean;
 }
 

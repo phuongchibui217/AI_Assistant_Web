@@ -4,6 +4,7 @@ import { getLocale, getMessages } from "next-intl/server";
 
 import "./globals.css";
 
+
 export const metadata: Metadata = {
   title: "AI Virtual Assistant",
   description: "AI Virtual Assistant System with Gemini Live voice and RAG knowledge base.",

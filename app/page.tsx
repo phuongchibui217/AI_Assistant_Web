@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: { embed?: string; key?: string };
+  searchParams?: { embed?: string; key?: string };
 }) {
   const {
     auth_enabled,
@@ -26,8 +26,8 @@ export default async function HomePage({
   // public settings endpoint); a valid key turns the login gate off, an invalid
   // or missing key refuses to load (fail-closed - no keyless guest access to the
   // paid chat/TTS APIs).
-  const isEmbed = searchParams.embed === "1";
-  const embedOk = isEmbed ? await verifyEmbedKey(searchParams.key) : false;
+  const isEmbed = searchParams?.embed === "1";
+  const embedOk = isEmbed ? await verifyEmbedKey(searchParams?.key) : false;
   if (isEmbed && !embedOk) {
     return (
       <main className="grid h-screen w-screen place-items-center bg-black px-6 text-center text-white">
@@ -52,6 +52,7 @@ export default async function HomePage({
       defaultMicLang={default_mic_lang}
       defaultTranslateLangA={default_translate_lang_a}
       defaultTranslateLangB={default_translate_lang_b}
+      cloudTranslationEnabled={Boolean(process.env.GEMINI_API_KEY?.trim())}
     />
   );
 }

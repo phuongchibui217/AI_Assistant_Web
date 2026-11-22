@@ -57,7 +57,7 @@ function writeLocalSettings(settings: ClientSettings): void {
   }
 }
 
-const CACHE_TTL_MS = 60_000;
+const CACHE_TTL_MS = process.env.NODE_ENV === "production" ? 10_000 : 1_000;
 let cached: { value: ClientSettings; at: number } | null = null;
 let inflight: Promise<ClientSettings> | null = null;
 

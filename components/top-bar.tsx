@@ -7,7 +7,7 @@ import { useTransition } from "react";
 
 import { setLocaleCookie } from "@/lib/locale-cookie";
 import type { Gender } from "@/hooks/use-gender";
-import { MIC_LANG_OPTIONS } from "@/lib/audio/mic-input-langs";
+import { TRANSLATE_LANG_OPTIONS } from "@/lib/audio/mic-input-langs";
 import type { SupportedLang } from "@/lib/lang-detect";
 import { cn } from "@/lib/utils";
 
@@ -17,14 +17,6 @@ const LANG_OPTIONS: Array<{ code: "vi" | "en" | "ja" | "zh-TW"; label: string }>
   { code: "ja", label: "JA" },
   { code: "zh-TW", label: "ZH" },
 ];
-
-// Interpreter mode: both sides of the pair are user-selectable (client spec
-// 2026-08-18, revised from an earlier ja<->foreign-only lock) - reuses the
-// mic-language list minus "auto" (not a real language to translate into).
-// Exported so MobileChat's header picker stays in lock-step with desktop.
-export const TRANSLATE_LANG_OPTIONS = MIC_LANG_OPTIONS.filter(
-  (o) => o.code !== "auto",
-) as Array<{ code: SupportedLang; name: string; flag: string }>;
 
 /**
  * Top-right floating pill: gender segmented control + avatar show/hide toggle

@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * Segmented control in the client Settings panel to switch the avatar between
- * the female (Chi) and male (瑛太) character. Driving state lives in the parent
+ * the female (Chi) and male (Lee) character. Driving state lives in the parent
  * (`useGender` in app-shell) so the avatar, icon, name, and voice all read the
  * same value.
  */

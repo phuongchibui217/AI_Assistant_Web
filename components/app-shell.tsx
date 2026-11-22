@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -15,7 +15,6 @@ import { MobileChat } from "@/components/mobile-chat";
 import { StatusIndicator } from "@/components/status-indicator";
 import { TopBar } from "@/components/top-bar";
 import { Button } from "@/components/ui/button";
-import { useActiveAssistant } from "@/hooks/use-active-assistant";
 import { useAvatarVisibility } from "@/hooks/use-avatar-visibility";
 import { useBackground } from "@/hooks/use-background";
 import { useClientSettings } from "@/hooks/use-client-settings";
@@ -57,11 +56,13 @@ export function AppShell({
   defaultMicLang,
   defaultTranslateLangA,
   defaultTranslateLangB,
+  cloudTranslationEnabled,
 }: {
   canSignOut: boolean;
   defaultMicLang: string;
   defaultTranslateLangA: string;
   defaultTranslateLangB: string;
+  cloudTranslationEnabled: boolean;
 }) {
   // Seed the interpreter-mode pair BEFORE any hook below reads it. These are
   // module-level (not React state) because `readTranslateMode()` runs on the
@@ -71,11 +72,9 @@ export function AppShell({
     asSupportedLang(defaultTranslateLangA, "ja"),
     asSupportedLang(defaultTranslateLangB, "en"),
   );
-  const session = useGeminiSession(defaultMicLang);
+  const session = useGeminiSession(defaultMicLang, cloudTranslationEnabled);
   const textInputRef = useRef<HTMLInputElement>(null);
   const t = useTranslations();
-  const locale = useLocale();
-  const assistant = useActiveAssistant();
   const clientSettings = useClientSettings();
   const isMobile = useIsMobile();
   const background = useBackground(
@@ -104,8 +103,7 @@ export function AppShell({
   const [helpOpen, setHelpOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutFailed, setLogoutFailed] = useState(false);
-  const greetedRef = useRef(false);
-  const greetingRef = useRef<{ id: string; isFallback: boolean } | null>(null);
+  const greetingRef = useRef<{ id: string; text: string } | null>(null);
   const connectedRef = useRef(false);
   const [avatar, setAvatar] = useState<Avatar | null>(null);
 
@@ -158,47 +156,16 @@ export function AppShell({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientSettings.loaded, clientSettings.voice_enabled]);
 
-  // Seed the initial greeting once the session is connected AND the admin
-  // assistant fetch has settled (success or fail). The greeting prefers the
-  // admin-managed value; if the API returned no greeting (or hasn't returned
-  // yet within a short window), we fall back to the i18n constant so the
-  // bubble is never empty. The flag is in a ref so reconnects don't repeat.
+  const greetingText = t("greeting", { name: avatarName });
   useEffect(() => {
-    if (session.status !== "ready" || greetedRef.current) return;
-    // Wait for the admin assistant fetch to settle so we don't show the
-    // i18n fallback for a frame and then replace it with the admin value.
-    if (!assistant.loaded) return;
-    greetedRef.current = true;
-    // Only the i18n fallback greeting embeds the persona name; an admin-set
-    // greeting is a fixed string we never rewrite on a gender switch.
-    const isFallback = !assistant.greeting;
-    const id = session.pushGreeting(
-      assistant.greeting ?? t("greeting", { name: avatarName }),
-    );
-    greetingRef.current = { id, isFallback };
-  }, [session, t, assistant.greeting, assistant.loaded, avatarName]);
-
-  // Rewrite the greeting text when the avatar gender OR the UI locale changes
-  // (locale added 2026-09: the LangSwitcher does a soft `router.refresh()`,
-  // not a full page reload, so the client component tree - and with it
-  // greetedRef/greetingRef - survives a language switch; without this the
-  // greeting bubble stayed frozen in whatever locale was active on first
-  // mount, e.g. switching JP -> zh-TW left the JP greeting text on screen).
-  // Only the i18n fallback contains a name; admin-set greetings are left
-  // untouched. The avatar icon updates on its own (useGender is a shared
-  // store).
-  useEffect(() => {
-    const g = greetingRef.current;
-    if (!g || !g.isFallback) return;
-    session.replaceModelText(g.id, t("greeting", { name: avatarName }));
-    // Depend ONLY on avatarName + locale (the two things that should trigger
-    // a rewrite). session and t are recreated every render; including them
-    // would re-run this effect on every render, and replaceModelText sets
-    // state -> an infinite re-render loop that starved the streaming/typing
-    // UI ("placeholder gone while generating"). The unguarded rewrite must
-    // fire solely on a gender switch or a locale switch.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [avatarName, locale]);
+    const greeting = greetingRef.current;
+    if (!greeting && session.status === "ready") {
+      greetingRef.current = { id: session.pushGreeting(greetingText), text: greetingText };
+    } else if (greeting && greeting.text !== greetingText) {
+      session.replaceModelText(greeting.id, greetingText);
+      greeting.text = greetingText;
+    }
+  }, [greetingText, session]);
 
   // "M" hotkey (replaces the old Space PTT binding): identical to the mic
   // button now - both auto-send on release (client spec 2026-07-30).

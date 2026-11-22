@@ -1,50 +1,23 @@
 import type { MouthAnimator } from "./mouth-animator";
 
 /**
- * Reads RMS amplitude from an AnalyserNode tapped on the playback queue and
- * converts it into a binary "speaking" signal driving the mouth animator.
- *
- * Hysteresis: a single threshold causes flicker on the silence-edge of every
- * chunk, so we use two thresholds.
- *
- * Asymmetric debounce (Unity parity, 2026-05-29): onset is INSTANT so the
- * mouth opens the moment the first audio sample crosses the ON threshold;
- * offset waits `OFFSET_HOLD_MS` (300ms, matching Unity GeminiLipSyncBridge
- * `_voiceOffDelay = 0.3f`) before flipping the flag off. This:
- *   - keeps the mouth visibly cycling across inter-sentence gaps in Cloud
- *     TTS playback (~100-300ms of silence between sentences),
- *   - feeds the downstream MouthAnimator briefSilence + slow-close so the
- *     full mouth-close timeline ≈ Unity's ~0.9s VoiceResultTimeTest budget,
- *   - removes the symmetric 60ms onset lag that made web mouth feel
- *     "behind" the audio at the start of an utterance.
+ * Drives openness from queued audio. Hysteresis smooths short silences within
+ * playback, while an empty playback queue closes the mouth immediately.
  */
 
-const RMS_THRESHOLD_ON = 0.02;
-const RMS_THRESHOLD_OFF = 0.005;
+const RMS_THRESHOLD_ON = 0.006;
+const RMS_THRESHOLD_OFF = 0.0025;
 const ONSET_HOLD_MS = 0;
-const OFFSET_HOLD_MS = 300;
+const OFFSET_HOLD_MS = 90;
 
-// Envelope follower for amplitude-driven mouth openness (male). Fast attack so
-// the mouth opens crisply on a syllable onset; slower release so it does not
-// chatter between syllables. Time constants in seconds.
-const ENV_ATTACK_TAU_S = 0.02;
-const ENV_RELEASE_TAU_S = 0.11;
-// Map the smoothed RMS to openness 0..1. Below FLOOR the mouth is closed; at/
-// above CEIL it is fully open. GAMMA < 1 lifts quiet speech so mid-volume still
-// opens the mouth noticeably (a linear map leaves normal speech barely open).
-// Openness = envelope normalised against a running PEAK (adaptive gain) rather
-// than a fixed ceiling. The analyser taps the RAW pre-gain signal whose
-// absolute level is unknown and varies by TTS engine, so a hard ceiling either
-// leaves the mouth shut (ceiling too high) or pinned open (too low). The
-// adaptive peak makes the mouth open fully on the loudest recent speech
-// whatever the level. GAMMA < 1 lifts quieter syllables.
-const ENV_FLOOR = 0.005;
-// The peak never drops below this, so silence/room-noise can't be amplified up
-// into an open mouth. Matches the old binary "speaking" ON threshold.
+// A running peak accommodates engines with different playback levels.
+const ENV_ATTACK_TAU_S = 0.016;
+const ENV_RELEASE_TAU_S = 0.062;
+const ENV_FLOOR = 0.002;
 const ENV_MIN_PEAK = 0.02;
 // How fast the peak decays back toward ENV_MIN_PEAK between loud moments.
 const ENV_PEAK_DECAY_TAU_S = 0.8;
-const ENV_GAMMA = 0.5;
+const ENV_GAMMA = 0.62;
 
 // Accent detection for secondary motion (e.g. a small eyebrow raise on a
 // stressed syllable). Fire when openness rises past FIRE, re-arm only after it
@@ -61,6 +34,7 @@ export class LipSyncDriver {
   private readonly onAccent?: () => void;
   private readonly buffer: Float32Array;
 
+  private trackingPlayback = false;
   private speaking = false;
   private candidateState: boolean | null = null;
   private candidateSinceMs = 0;
@@ -74,6 +48,7 @@ export class LipSyncDriver {
     mouth: MouthAnimator,
     onSpeakingChange?: (speaking: boolean) => void,
     onAccent?: () => void,
+    private readonly hasPlayback: () => boolean = () => true,
   ) {
     this.analyser = analyser;
     this.mouth = mouth;
@@ -82,7 +57,25 @@ export class LipSyncDriver {
     this.buffer = new Float32Array(analyser.fftSize);
   }
 
+  reset(): void {
+    const wasSpeaking = this.speaking;
+    this.trackingPlayback = false;
+    this.speaking = false;
+    this.candidateState = null;
+    this.candidateSinceMs = 0;
+    this.env = 0;
+    this.envPeak = ENV_MIN_PEAK;
+    this.accentArmed = true;
+    this.mouth.stopSpeech();
+    if (wasSpeaking) this.onSpeakingChange?.(false);
+  }
+
   update(dt: number): void {
+    if (!this.hasPlayback()) {
+      if (this.trackingPlayback) this.reset();
+      return;
+    }
+    this.trackingPlayback = true;
     this.analyser.getFloatTimeDomainData(
       this.buffer as Float32Array<ArrayBuffer>,
     );
@@ -131,8 +124,7 @@ export class LipSyncDriver {
         this.candidateSinceMs = 0;
       }
       this.candidateSinceMs += dt * 1000;
-      // Asymmetric: 0ms for onset (open immediately), OFFSET_HOLD_MS for
-      // closing (hold open through inter-sentence silences).
+      // Close gently across brief gaps while there is still queued audio.
       const holdMs = desired ? ONSET_HOLD_MS : OFFSET_HOLD_MS;
       if (this.candidateSinceMs >= holdMs) {
         this.speaking = desired;

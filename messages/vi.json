@@ -1,6 +1,6 @@
 {
   "greeting": "Xin chào! Tôi là {name}. Hôm nay tôi có thể hỗ trợ gì cho bạn? Hãy sử dụng micrô hoặc nhập câu hỏi vào ô bên dưới nhé.",
-  "avatarNameMale": "Trợ lý AI",
+  "avatarNameMale": "Lee",
   "bottomBar": {
     "placeholder": "Nhập câu hỏi hoặc nhấn giữ micrô để nói chuyện...",
     "recognizing": "Đang nhận diện giọng nói…",
@@ -51,7 +51,7 @@
     "futureNote": "Tùy chỉnh ngôn ngữ, giọng đọc và mô hình AI sẽ được cập nhật trong phiên bản tiếp theo.",
     "genderLabel": "Nhân vật đại diện",
     "genderFemale": "Nữ (Chi)",
-    "genderMale": "Nam (Eita)",
+    "genderMale": "Nam (Lee)",
     "logout": "Đăng xuất",
     "logoutFailed": "Đăng xuất thất bại. Vui lòng thử lại."
   },
@@ -81,6 +81,11 @@
   "errors": {
     "speechUnsupported": "Trình duyệt này chưa hỗ trợ thu âm giọng nói. Vui lòng sử dụng Google Chrome hoặc Microsoft Edge.",
     "micPermissionDenied": "Quyền truy cập micrô bị từ chối. Vui lòng kiểm tra lại cài đặt trình duyệt.",
-    "speechUnavailable": "Không phát được giọng đọc cho ngôn ngữ của câu trả lời."
+    "speechUnavailable": "Không phát được giọng {language}.",
+    "speechVoiceMissing": "Trình duyệt chưa có giọng {language}. Bạn vẫn có thể đọc câu trả lời.",
+    "translationUnavailable": "Chế độ phiên dịch chưa dùng được vì dịch vụ dịch chưa được cấu hình.",
+    "translationDemoUnavailable": "Trình duyệt chưa dịch được câu này. Bạn có thể chọn cặp Việt–Anh và thử câu mẫu ‘Xin chào’.",
+    "translationFailed": "Không thể dịch nội dung này. Vui lòng thử lại.",
+    "chatFailed": "Không thể tạo câu trả lời. Vui lòng thử lại."
   }
 }

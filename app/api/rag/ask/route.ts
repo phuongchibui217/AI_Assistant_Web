@@ -110,10 +110,8 @@ export async function POST(req: Request): Promise<Response> {
     }
   }
 
-  // Spoken-language hint from Chirp (mic path). Chirp detects the spoken
-  // language far more reliably than script-guessing a short transcript - it
-  // tells Latin-script languages (fil/pt/en) apart, which detectLang cannot -
-  // so when it maps to a supported language we trust it over text detection.
+  // A client hint identifies the recognized speech or the current input's
+  // language, with the UI preference resolving ambiguous Latin text.
   const langHint =
     typeof payload.langHint === "string"
       ? sttLangToSupported(payload.langHint)
@@ -267,7 +265,7 @@ export async function POST(req: Request): Promise<Response> {
         // still come first as the baseline; the override block can change
         // voice/tone but is instructed below to leave grounding intact.
         const systemInstruction = assistant?.system_instruction
-          ? `${RAG_SYSTEM_PROMPT}\n\n# Session override (admin-configured persona + active stance)\nApply the following tone/persona rules on top of the answer. Do NOT change citations, grounding, or factual content - only adjust voice, sentence shape, and persona.\n\n${assistant.system_instruction}`
+          ? `${RAG_SYSTEM_PROMPT}\n\n# Session persona and active stance\nUse these settings for tone and persona. Preserve citations, grounding, and factual content.\n\n${assistant.system_instruction}\n\nFollow the current question's reply-language instruction above all persona, stance, and conversation-history language preferences.`
           : RAG_SYSTEM_PROMPT;
 
         for await (const delta of streamFlashContent(
